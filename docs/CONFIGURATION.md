@@ -1,4 +1,4 @@
-# Configuration reference
+# LUnA — Configuration reference
 
 The agent reads one YAML file (`-config <path>`, or `LOGROK_UNIVERSAL_AGENT_CONFIG`, default `agent.yaml`).
 A working template is [`configs/agent.example.yaml`](../configs/agent.example.yaml). The same schema applies on

@@ -1,4 +1,4 @@
-# logrok-universal-agent — User Guide
+# LUnA — User Guide
 
 A practical guide to installing, configuring, running, and operating the agent. For the exact meaning of every
 config key see the **[Configuration Reference](CONFIGURATION.md)**; this guide is the task-oriented walkthrough.
