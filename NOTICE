@@ -1,0 +1,48 @@
+logrok-universal-agent
+Copyright (c) Logiqum
+
+This product includes software developed at the OpenTelemetry project.
+
+  internal/input/eventlog/evtapi_windows.go (and the structure of the Windows
+  Event Log reader in internal/input/eventlog/eventlog_windows.go) is derived
+  from the OpenTelemetry Collector Contrib stanza Windows Event Log input
+  (pkg/stanza/operator/input/windows), licensed under the Apache License,
+  Version 2.0:
+
+      Copyright The OpenTelemetry Authors
+      SPDX-License-Identifier: Apache-2.0
+      https://github.com/open-telemetry/opentelemetry-collector-contrib
+
+  A copy of the Apache License, Version 2.0 is included with this distribution
+  as LICENSE-APACHE-2.0.txt, and is also available at:
+      https://www.apache.org/licenses/LICENSE-2.0
+
+The Windows Event Log XML schema mapping and the wevtapi constant/signature
+details were also cross-checked against Elastic Winlogbeat
+(winlogbeat/sys/wineventlog, winlogbeat/sys/winevent), Apache License 2.0,
+Copyright Elasticsearch B.V. — https://github.com/elastic/beats
+
+This product includes the following third-party Go modules used by the `otlp`
+output (`internal/output/otlp/`):
+
+  connectrpc.com/connect — the gRPC wire protocol on top of net/http (no
+  grpc-go), licensed under the Apache License, Version 2.0:
+      https://github.com/connectrpc/connect-go
+
+  google.golang.org/protobuf, licensed under a 3-clause BSD license:
+      Copyright (c) 2018 The Go Authors. All rights reserved.
+      https://github.com/protocolbuffers/protobuf-go
+
+  golang.org/x/net, licensed under a 3-clause BSD license:
+      Copyright 2009 The Go Authors.
+      https://github.com/golang/net
+
+  buf.build/gen/go/opentelemetry/opentelemetry/protocolbuffers/go — generated
+  Go bindings for the OpenTelemetry Protocol (opentelemetry-proto), licensed
+  under the Apache License, Version 2.0:
+      Copyright 2019, OpenTelemetry Authors
+      https://github.com/open-telemetry/opentelemetry-proto
+
+  A copy of the Apache License, Version 2.0 is included with this distribution
+  as LICENSE-APACHE-2.0.txt, and is also available at:
+      https://www.apache.org/licenses/LICENSE-2.0

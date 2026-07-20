@@ -1,0 +1,110 @@
+LUnA — logrok universal agent
+End-User License Agreement
+
+Copyright © 2026 Logiqum Korlátolt Felelősségű Társaság ("Logiqum").
+The Software is licensed, not sold.
+
+By downloading, installing, or running the Software you accept this Agreement.
+If you do not accept it, do not use the Software.
+
+## 1. Definitions
+- **Software** — the LUnA (logrok universal agent) binaries, packages, container
+  images, and accompanying documentation distributed by Logiqum.
+- **Core** — the free capability set the Software runs with **no license** (file
+  tail, syslog-in, journald, HTTP-in, parsers, TLS syslog output, metrics).
+- **Apex** — the paid capability set (incl. Windows Event Log, disk
+  store-and-forward spool, central fleet management, edge reduction, per-agent
+  mTLS, ack'd relay, Kubernetes container-log, macOS unified-log, UDP/data-diode
+  output, experimental OS architectures).
+- **Agent** — one running instance of the Software on one host. Counting is
+  **per Agent, not per container or per source.**
+- **Entitlement** — a Logiqum-signed grant (enrollment-derived from a licensed
+  logrok deployment, or a standalone signed license file) that authorizes Apex
+  for a stated tier, Agent count, and term.
+- **Non-commercial use** — personal, educational, research, or evaluation use not
+  undertaken for or in connection with commercial advantage or monetary
+  compensation.
+
+## 2. License grant
+Subject to your compliance with this Agreement, Logiqum grants you a limited,
+non-exclusive, non-transferable, revocable license to install and run the
+Software as follows:
+
+- **2.1 Core — free.** You may run the Software's **Core** capabilities at no
+  charge for: (a) **Non-commercial use**; (b) use **together with a validly
+  licensed logrok deployment**; and (c) **commercial use up to 10 Agents** (the
+  "free commercial floor"). Core has no Agent limit for (a) and (b).
+- **2.2 Apex — requires an Entitlement.** Apex capabilities require a valid
+  Entitlement — either issued automatically to an Agent enrolled with a licensed
+  logrok deployment (**free with logrok**), or a **standalone commercial**
+  Entitlement purchased from Logiqum. Your use of Apex is limited to the tier,
+  Agent count, and term stated in your Entitlement or applicable order.
+- **2.3 Grace and degradation.** When a paid Entitlement expires, Apex
+  capabilities continue for a **grace period (default 30 days)**, after which the
+  Software **degrades to Core** and continues running. The Software never ceases
+  operating, and never grants more than Core without a valid Entitlement.
+
+## 3. Restrictions
+You may not: (a) redistribute, resell, rent, lease, sublicense, or host the
+Software as a service to third parties; (b) reverse-engineer, decompile, or
+disassemble the Software, except to the extent applicable law or a third-party
+component's license expressly permits; (c) remove or alter proprietary notices;
+(d) circumvent, disable, or tamper with the entitlement or its enforcement; or
+(e) use the Software beyond the scope granted in §2.
+
+## 4. Ownership
+The Software is proprietary to and a trade secret of Logiqum, protected by law.
+Logiqum reserves all rights not expressly granted. No title passes to you.
+
+## 5. No telemetry
+The Software validates its Entitlement **entirely offline** and does **not** phone
+home, call a licensing portal, or transmit usage or telemetry to Logiqum for
+licensing purposes. It is designed to run in fully air-gapped environments.
+
+## 6. Third-party components
+The Software includes components under the Apache License 2.0 (notably the Windows
+Event Log reader derived from the OpenTelemetry Collector). Those components remain
+governed by their own licenses; see NOTICE and LICENSE-APACHE-2.0.txt. This
+Agreement governs the work as a whole except where a third-party license governs a
+specific component.
+
+## 7. Term and termination
+This Agreement applies for as long as you use the Software. Logiqum may terminate
+the Apex grant on your material breach; on termination of an Apex grant the
+Software reverts to Core. Sections 3, 4, 8, 9, and 12 survive termination.
+
+## 8. Warranty disclaimer
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT.
+
+## 9. Limitation of liability
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, LOGIQUM WILL NOT BE LIABLE FOR ANY
+INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES, OR LOST PROFITS OR DATA.
+LOGIQUM'S TOTAL LIABILITY UNDER THIS AGREEMENT WILL NOT EXCEED THE GREATER OF THE
+FEES YOU PAID TO LOGIQUM FOR THE SOFTWARE IN THE TWELVE (12) MONTHS PRECEDING THE
+CLAIM, OR ONE HUNDRED EUROS (€100).
+
+## 10. IP indemnity (paying customers)
+Logiqum will defend any paying customer against third-party claims that the
+Software as delivered infringes their intellectual-property rights, and pay
+resulting costs and damages finally awarded, subject to your prompt written notice
+and reasonable cooperation. This obligation does not apply to claims arising from
+modification of the Software, its combination with anything not supplied by
+Logiqum, or use outside the scope of this Agreement.
+
+## 11. Export compliance
+You will comply with all applicable export-control and sanctions laws in your use
+of the Software.
+
+## 12. Governing law
+This Agreement is governed by the laws of Hungary, without regard to
+conflict-of-laws rules, and the parties submit to the exclusive jurisdiction of
+the courts of Budapest, Hungary. Nothing in this Agreement limits any mandatory
+statutory rights you have as a consumer under the laws of your country of
+residence that cannot be waived or excluded by contract.
+
+## 13. Entire agreement
+This Agreement, together with any Logiqum order or quote for Apex (which controls
+price, Agent count, and term), is the entire agreement on its subject matter and
+supersedes prior understandings.
