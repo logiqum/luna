@@ -1,0 +1,36 @@
+name: Bug report
+description: Something in LUnA isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve LUnA. For **security** issues, do **not** file here — see our
+        [Security Policy](https://github.com/logiqum/luna/security/policy).
+  - type: input
+    id: version
+    attributes:
+      label: LUnA version
+      placeholder: e.g. v0.17.0 (see `logrok-universal-agent -version`)
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Windows, Linux, macOS, Container, FreeBSD/NetBSD/OpenBSD, Solaris, AIX, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened? Include relevant config (redact secrets) and agent logs.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false

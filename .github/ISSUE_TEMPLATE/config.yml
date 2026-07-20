@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 User guide & configuration reference
+    url: https://github.com/logiqum/luna/tree/main/docs
+    about: Install, run, deploy, operate, and every config option — check here first.
+  - name: 🌐 Downloads & product page
+    url: https://logrok.com/download
+    about: All platforms, installers, and verification instructions.
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/logiqum/luna/security/advisories/new
+    about: Private disclosure — please do not open a public issue for security reports.
