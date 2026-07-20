@@ -1,10 +1,3 @@
----
-title: "User Guide"
-description: "Install, configure, run, and operate the logrok-universal-agent — a practical, task-oriented walkthrough."
-sidebar:
-  order: 2
----
-
 # logrok-universal-agent — User Guide
 
 A practical guide to installing, configuring, running, and operating the agent. For the exact meaning of every

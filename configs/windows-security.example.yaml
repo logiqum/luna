@@ -1,0 +1,72 @@
+# Windows security telemetry preset — Security + Sysmon + PowerShell + System, tuned
+# to a starting event-ID set → any syslog aggregator (logrok by default).
+#
+# This is a STARTING SET, not a definitive list — see docs/USER-GUIDE.md
+# ("Windows event IDs worth collecting") for what each ID signals and why it's here.
+# Tune the query/channel list to your environment.
+#
+# Prerequisites:
+#   - The service must run with administrator privileges to read the Security channel
+#     (SeSecurityPrivilege) — see docs/USER-GUIDE.md Troubleshooting.
+#   - 4688's command-line field needs the "Include command line in process creation
+#     events" GPO enabled (Computer Configuration > Administrative Templates > System
+#     > Audit Process Creation).
+#   - Sysmon (Sysinternals) installed for the Sysmon channel:
+#     https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon
+#     (see configs/sysmon.example.yaml for the full Sysmon-only preset)
+
+service:
+  mode: service
+  log_level: info
+  metrics_listen: "127.0.0.1:9090"
+
+buffer:
+  enabled: true
+  dir: 'C:\ProgramData\logrok-universal-agent\spool'
+  max_bytes: 1073741824        # 1 GiB
+
+inputs:
+  # Core security telemetry: logon/logoff, process creation, account & group changes,
+  # privilege use, scheduled tasks. See docs/USER-GUIDE.md for the full ID reference.
+  - type: windows_eventlog
+    name: security-core
+    channels: [Security]
+    query: "*[System[(EventID=4624 or EventID=4625 or EventID=4634 or EventID=4647 or EventID=4688 or EventID=4720 or EventID=4726 or EventID=4728 or EventID=4732 or EventID=4672 or EventID=4698)]]"
+
+  # Service installs — a common persistence/lateral-movement signal.
+  - type: windows_eventlog
+    name: service-install
+    channels: [System]
+    query: "*[System[(EventID=7045)]]"
+
+  # PowerShell script block logging (captures deobfuscated script content). Requires
+  # "Turn on PowerShell Script Block Logging" GPO enabled on the endpoint.
+  - type: windows_eventlog
+    name: powershell
+    channels: [Microsoft-Windows-PowerShell/Operational]
+    query: "*[System[(EventID=4104)]]"
+
+  # Sysmon: process creation, network connections, file creation, DNS queries.
+  - type: windows_eventlog
+    name: sysmon-core
+    channels: [Microsoft-Windows-Sysmon/Operational]
+    query: "*[System[(EventID=1 or EventID=3 or EventID=11 or EventID=22)]]"
+
+processors:
+  - type: add_fields
+    fields:
+      telemetry: windows-security
+
+  # Optional edge reduction — see docs/USER-GUIDE.md "Reduce volume at the edge".
+  # Always guard stateful reduction processors so error/critical events are exempt:
+  # - type: throttle
+  #   max: 500
+  #   window: 1m
+  #   key: [host]
+  #   keep_min_severity: 3
+
+outputs:
+  - type: syslog
+    endpoint: "aggregator:6514"
+    tls: true
+    ca_file: 'C:\ProgramData\logrok-universal-agent\ca.pem'

@@ -1,10 +1,3 @@
----
-title: "Configuration Reference"
-description: "Complete reference for agent.yaml: inputs, processors, outputs, buffer, and management options."
-sidebar:
-  order: 90
----
-
 # Configuration reference
 
 The agent reads one YAML file (`-config <path>`, or `LOGROK_UNIVERSAL_AGENT_CONFIG`, default `agent.yaml`).

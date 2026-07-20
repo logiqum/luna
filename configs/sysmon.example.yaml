@@ -1,0 +1,62 @@
+# Sysmon preset — Windows security telemetry → any syslog aggregator (logrok by default)
+#
+# Sysmon (Sysinternals) writes rich endpoint-security events (process creation with
+# command lines + hashes, network connections, DNS queries, registry changes, …) to a
+# regular Event Log channel: Microsoft-Windows-Sysmon/Operational. The agent's
+# windows_eventlog input reads it like any other channel — no extra code, no ETW needed.
+#
+# Prerequisite: Sysmon installed on the endpoint (sysmon64 -accepteula -i [config.xml]).
+#   https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon
+#
+# Event IDs (per the Sysinternals reference above):
+#   1 ProcessCreate · 2 FileCreateTime · 3 NetworkConnect · 5 ProcessTerminate ·
+#   6 DriverLoad · 7 ImageLoad · 8 CreateRemoteThread · 9 RawAccessRead ·
+#   10 ProcessAccess · 11 FileCreate · 12-14 RegistryEvent · 15 FileCreateStreamHash ·
+#   16 ConfigChange · 17/18 PipeEvent · 19-21 WmiEvent · 22 DNSQuery · 23/26 FileDelete ·
+#   24 ClipboardChange · 25 ProcessTampering · 27-29 FileBlock/ExecutableDetected · 255 Error
+#
+# Volume note: filter FIRST in the Sysmon XML config itself (its include/exclude rules
+# are the cheapest place to cut noise). The agent-side query/processors below are the
+# second line of defense — e.g. when you can't change the Sysmon config.
+
+service:
+  mode: service
+  log_level: info
+  metrics_listen: "127.0.0.1:9090"
+
+buffer:
+  enabled: true
+  dir: 'C:\ProgramData\logrok-universal-agent\spool'
+  max_bytes: 1073741824        # 1 GiB
+
+inputs:
+  - type: windows_eventlog
+    name: sysmon
+    channels: [Microsoft-Windows-Sysmon/Operational]
+    # Optional source-side filter: subscribe only to a high-signal detection set
+    # (1 ProcessCreate, 3 NetworkConnect, 6 DriverLoad, 8 CreateRemoteThread,
+    #  10 ProcessAccess, 11 FileCreate, 22 DNSQuery, 25 ProcessTampering):
+    # query: "*[System[(EventID=1 or EventID=3 or EventID=6 or EventID=8 or EventID=10 or EventID=11 or EventID=22 or EventID=25)]]"
+
+  # Usually deployed alongside the core channels — uncomment to combine:
+  # - type: windows_eventlog
+  #   name: core
+  #   channels: [Application, System, Security]
+
+processors:
+  - type: add_fields
+    fields:
+      telemetry: sysmon
+
+  # Agent-side noise reduction (second line — prefer filtering in the Sysmon config):
+  # ImageLoad (7) and ProcessAccess (10) are documented high-volume event types.
+  # - type: expr
+  #   rules:
+  #     - if: 'fields.event_id == "7" || fields.event_id == "10"'
+  #       drop: true
+
+outputs:
+  - type: syslog
+    endpoint: "aggregator:6514"
+    tls: true
+    ca_file: 'C:\ProgramData\logrok-universal-agent\ca.pem'
