@@ -67,6 +67,17 @@ cosign verify --key https://raw.githubusercontent.com/logiqum/luna/main/cosign.p
 
 These docs are kept in sync with each release automatically.
 
+## What this repository contains
+
+This is LUnA's **public download and documentation** home: signed release binaries, the operator docs above,
+example configurations, and the `cosign.pub` verification key. Verify any download with `SHA256SUMS` and
+`cosign`.
+
+It is **not** a source repository. The "Source code (zip)" and "Source code (tar.gz)" links GitHub attaches
+to every release contain only the files in this repository — the documentation and example configs above —
+not the agent's source, which is not publicly distributed. GitHub provides no way to hide those links, so
+this note is here instead.
+
 ## License
 
 LUnA is licensed under the **[End-User License Agreement](LICENSE)**. The free **Core** capability set runs
