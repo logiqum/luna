@@ -1,0 +1,6 @@
+# GitHub builds the "Source code (zip/tar.gz)" release archives with `git archive`,
+# which honours export-ignore. This repo publishes binaries and docs, not source, so
+# those auto-attached archives are emptied rather than shipping a tree nobody wants.
+# GitHub offers no way to remove the links themselves (community discussions #6003,
+# #111327, #166048), so emptying the payload is the only available lever.
+* export-ignore
