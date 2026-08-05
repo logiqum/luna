@@ -245,6 +245,18 @@ processors:
   #   max_message_bytes: 4096         # truncate message to N bytes (rune-safe, appends …); 0 = no limit
   #   max_field_bytes: 512            # truncate each field value to N bytes; 0 = no limit
 
+  # - type: redact                    # remove sensitive values ON THE ENDPOINT, before they cross the wire
+  #   patterns: [email, credit_card]  # built-ins: email, ipv4, credit_card (Luhn-checked, not "any 16 digits")
+  #   regex: ['token=[A-Za-z0-9]+']   # additional site-specific patterns (RE2)
+  #   mode: mask                      # mask (default) | hash (salted SHA-256, stays correlatable) | remove
+  #   replacement: "[REDACTED]"       # replacement text in mask mode
+  #   hash_salt: ""                   # salt for hash mode; agents sharing it produce matching digests
+  #   fields: []                      # restrict to these field names; empty = every field
+  #   skip_fields: [host]             # never redact these (wins over `fields`)
+  #   skip_message: false             # true = redact fields only, leave the message alone
+  #   # NOTE: at least one of patterns/regex is required — a redact step matching nothing
+  #   # would pass sensitive data through while looking configured, so the agent refuses it.
+
 outputs:
   # Forward as RFC 5424 over TCP/TLS to any aggregator (a logrok deployment,
   # a SIEM, any syslog collector). Standard ports: 514 plain, 6514 TLS.
@@ -253,7 +265,7 @@ outputs:
     endpoint: "aggregator:6514"
     protocol: tcp            # default. 'udp' = one datagram per message (RFC 5426) for data diodes / udp() receivers; no TLS, no framing
     framing: newline         # TCP only, default. one msg per LF (logrok syslog-ng + most receivers). 'octet-counting' = RFC 6587, opt-in
-    # sequence: true         # add [seq@99999 session=".." n=".."] SD — receiver-side gap detection on one-way links
+    # sequence: true         # add [seq@66371 session=".." n=".."] SD — receiver-side gap detection on one-way links
     # max_datagram_size: 8192 # UDP only — datagrams truncated to this many bytes
     # encoding: json         # default 'text'. 'json' = MSG is one JSON object (timestamp/host/source/severity/facility/message/fields), no fields-SD duplication; multi-line messages survive newline framing
     tls: true
@@ -264,6 +276,16 @@ outputs:
     # cert_source: enrolled  # present the management.tls.mode: enrolled cert on the log channel (needs enrolled management)
     # server_name: "logrok-syslog-ng"   # verification name override (SNI)
     # insecure_skip_verify: true        # DEV ONLY — disables server verification
+    # --- reconnect drain pacing (unacked syslog/snare only; default OFF) ---
+    # For a high-volume plain-syslog feed into a BOUNDED receiver: after an outage
+    # the durable spool would re-blast the whole backlog at line rate on reconnect
+    # and — with no delivery ack on plain syslog — the receiver's overflow drops are
+    # invisible. Pacing caps the drain rate and slow-starts a recovered receiver.
+    # drain_pacing:
+    #   rate_eps: 20000        # steady backlog-drain cap (events/sec); 0 = unlimited
+    #   slow_start: true       # default: start low, double each second up to rate_eps
+    #   ramp_start_eps: 1000   # default rate_eps/16 (min 1): initial post-reconnect rate
+    #   jitter: true           # default: per-agent delay so a fleet doesn't stampede
 
   # Diode mode (one-way link out of an OT zone): UDP + sequence numbers, no TLS.
   # - type: syslog

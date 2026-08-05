@@ -8,6 +8,13 @@ every platform.
 `inputs` / `processors` / `outputs` entry has a `type`, an optional `name`, and then **that module's own
 options inline** — adding a module type never changes the schema.
 
+**Unknown option keys are surfaced, not silent.** A module option key it doesn't recognise (a typo, or a
+removed/renamed option) is logged at **WARN** at startup — naming the module and the offending key — and the
+option falls back to its default. Watch the startup logs for `ignoring unknown option key(s)`: a typo in a
+reliability-critical key (`dead_letter_dir`, `on_reject`, `ack_timeout`, `use_ack`, …) otherwise silently runs
+the default. The config still loads (an unknown key is not fatal), so a stale key on upgrade won't stop the
+agent — but the warning tells you to fix it.
+
 **Status key:** ✅ implemented · ◐ partial · 🔜 planned. Pipeline: `inputs → processors → output → buffer (on
 write-fail)`. v1 ships a single output.
 
@@ -22,12 +29,18 @@ write-fail)`. v1 ships a single output.
 | `metrics_listen` | string | `""` (off) | ✅ | e.g. `127.0.0.1:9090` → serves Prometheus text at `/metrics`. **Bind localhost** unless scraped remotely. |
 
 **Metrics exposed:** `logrok_agent_events_in_total`, `events_out_total`, `events_dropped_total`,
-`backpressure_waits_total`, `spool_meta_write_errors_total`, `spool_tamper_detected_total` (counters),
+`backpressure_waits_total`, `spool_meta_write_errors_total`, `spool_write_errors_total`,
+`udp_truncated_total`, `spool_tamper_detected_total` (counters),
 `buffer_depth`, `last_forward_timestamp_seconds`, `spool_chain_legacy_segments`,
 `license_state{state}` (0/1 per posture: core/licensed/grace/degraded), `license_grace_days_left`,
 `license_info{tier,enforced}` (gauges). A non-zero
 `spool_meta_write_errors_total` means the disk spool could not persist its read-head position (e.g. a
-full or read-only spool disk) — its resume point may be stale after a restart. `spool_tamper_detected_total`
+full or read-only spool disk) — its resume point may be stale after a restart. A non-zero-and-climbing
+`spool_write_errors_total` means the spool disk is failing a batch **write/fsync** (not a capacity drop):
+the pipeline retries that batch and never drops or commits it, so a transient fault (an ENOSPC that clears
+as the drain frees space) self-heals, while a persistent fault (read-only or dead disk) backpressures the
+inputs rather than losing data — even under `when_full: drop_newest`/`drop_oldest`, which govern the
+configured **capacity** cap, not a hardware fault. `spool_tamper_detected_total`
 counts tamper-evidence chain-verification failures **per observation, not per unique record** — the same
 tampered record recounts every time it is re-read (a retried drain window, or a restart before the
 segment holding it drains), so treat it as an "is tampering being observed" signal rather than a
@@ -75,7 +88,7 @@ Disk-backed store-and-forward — the air-gap guarantee.
 |---|---|---|---|---|
 | `enabled` | bool | `false` | ✅ | turn the spool on |
 | `dir` | string | `""` | ✅ | spool directory. **Set this** to survive restarts; empty → in-memory only (lost on restart). |
-| `max_bytes` | int | `0` | ✅ | on-disk cap; `0` = unbounded. Behaviour at the cap is set by `when_full`. |
+| `max_bytes` | int | `0` | ✅ | on-disk cap; `0` = unbounded. Behaviour at the cap is set by `when_full`. Honored for any positive value; a very small cap (below ~64 KiB) may transiently hold up to one ~64 KiB segment. |
 | `when_full` | string | `drop_oldest` | ✅ | `drop_oldest` (discard oldest spooled, keep freshest) \| `drop_newest` (refuse new, keep oldest) \| `block` (back-pressure the source until space frees — no loss). |
 | `flush_every` | duration | `2s` | ◐ | drain cadence |
 | `chain_key_file` | string | `""` (auto-resolved) | ✅ | overrides where the tamper-evidence chain key lives. Empty = resolved automatically (see below). |
@@ -87,6 +100,16 @@ recover. When `when_full: block`, the agent throttles its inputs once the spool 
 watch `backpressure_waits_total` to see it engage. Under `when_full: drop_oldest`, events discarded to honor
 `max_bytes` are counted in the dropped-events metric and logged, so cap-overflow loss is visible rather than
 silent.
+
+**If store-and-forward is withdrawn (licensing).** The disk spool is an Apex capability. When an agent is
+running without a covering entitlement *and* enforcement is active, the spool switches to **drain-only**
+rather than being switched off: it is still opened, and every event already written to it is delivered
+normally, but it accepts no new events. You will see one warning at start and a single
+`spool drain complete` line once the existing backlog has been delivered. While the agent is drain-only,
+Core forwarding is unaffected — events go straight to the output as usual; they are only lost if the output
+is unavailable, and each such loss is counted in `logrok_agent_events_dropped_total` and logged, never
+silent. The spool directory and its contents are never deleted. Enforcement is off by default today; set
+`LICENSE_ENFORCE=1` to exercise this behavior for a single run.
 
 ### Tamper-evident chaining (on by default)
 
@@ -145,8 +168,11 @@ agent's spool is tamper-evident" holds fleet-wide without per-agent setup.
 ## `licensing`
 
 Points the agent at its license. **Optional — omit it and the agent runs the free
-default at any scale** (also the case for the managed "free with logrok" path, where the
-entitlement is delivered over enrollment).
+Core tier at any scale** (also the case for the managed "free with logrok" path, where the
+entitlement is delivered over enrollment). A config using Apex-tier capabilities without a
+covering entitlement has those modules disabled at load (degrade-to-Core, after any grace
+window) — Core capabilities are never blocked and the agent never exits over licensing.
+Model, tiers, and license states: [LICENSING.md](LICENSING.md).
 
 | Key | Type | Default | Status | Notes |
 |---|---|---|---|---|
@@ -415,6 +441,12 @@ and hostname extracted**, tag+body kept as the message; assumes the current year
 octet-counting vs newline framing. Unparseable input is kept verbatim as the message. This is how devices/MCUs
 that can't run the agent feed a gateway.
 
+**Listener hardening:** the TCP/stream-unix path bounds each frame (1 MiB) and enforces a **5-minute idle read
+deadline** — a peer that stalls mid-message or opens a connection and sends nothing is closed, so an
+unauthenticated slow client can't pin connections open (slow-loris). A legitimately low-volume sender that
+delivers a complete message within the window is never dropped. The deadline is a fixed default, not
+configurable.
+
 ### `relay_in` ✅ — cross-platform (the ack'd-transport receiver)
 
 Listens for the agent's own acknowledged relay protocol — the receiving half of an agent→agent hop (the
@@ -469,6 +501,11 @@ token `401`, and an oversized body `413`. Events enter the pipeline (spooled on 
 into the buffer); there is no application-level delivery ack back to the HTTP client (same contract as
 `syslog_in`).
 
+**Listener hardening:** alongside the body-size cap, the server bounds slow reads — a header timeout, a
+whole-request read timeout, and a **5-minute idle keep-alive deadline** — so an unauthenticated peer that
+dribbles a request body or opens an idle connection can't hold a handler open (slow-loris). Fixed defaults,
+not configurable.
+
 ### `mqtt_in` ✅ — cross-platform (MQTT subscriber; IoT/edge ingest)
 
 Subscribes to an MQTT broker and turns each published message into an event — the common IoT/edge shape
@@ -503,8 +540,11 @@ each received `PUBLISH` into one event: the payload becomes `Event.Message` verb
 host, and `mqtt_topic` / `mqtt_qos` are recorded as fields. Like the other ingresses it is kept
 **vendor-neutral** — to structure a JSON/CSV payload, add a [`parse_json`](#parse_json---message--structured-fields-nxlog-xm_json-parity)/[`parse_csv`](#parse_csv---csvdsv-message--structured-fields-nxlog-xm_csv-parity)
 processor downstream rather than baking a format into the input. A QoS-1 message is acknowledged (PUBACK) only
-**after** the event is accepted onto the pipeline (spooled on backpressure — at-least-once into the buffer), so
-a crash before hand-off leaves the broker to redeliver. On any connection error the client reconnects with
+**after the event is durable** — written to the disk spool, delivered, or deliberately dropped — not merely
+accepted onto the pipeline. An agent crash at any point before that leaves the message un-acknowledged, so the
+broker redelivers it; the agent never tells a broker it holds an event it could still lose. PUBACKs are emitted
+in the order the messages arrived, so a slow event briefly holds back the acknowledgements behind it. On any
+connection error the client reconnects with
 jittered exponential backoff (cap 30s) and re-subscribes; on shutdown it sends a graceful DISCONNECT. The MQTT
 3.1.1 client is hand-rolled from the stdlib (no new dependency, still cgo-free). **QoS 2 limitation:** a QoS-2
 `PUBLISH` from the broker is emitted best-effort with a one-shot warning and **no** PUBREC handshake (the broker
@@ -886,6 +926,46 @@ up to N+3 bytes. Size limits at your SIEM or syslog receiver must account for th
   max_field_bytes: 512
 ```
 
+#### `redact` ✅ — remove sensitive values before they leave the host
+
+Rewrites matching substrings in the message and/or field values. Never drops events.
+
+Redaction happens **on the endpoint that produced the data**, so a value you must not retain never crosses
+the wire. Masking at the collector still means the secret travelled and was written down somewhere upstream.
+
+At least one of `patterns` or `regex` is required — a `redact` step that matches nothing would pass sensitive
+data through while looking configured, so the agent refuses to start instead.
+
+**Built-in patterns are deliberately conservative.** A pattern that fires on the wrong value destroys data
+nobody can recover or even identify downstream, so `credit_card` is validated with the Luhn checksum rather
+than matching any run of digits, `ipv4` range-checks each octet (so `999.1.1.1` and version strings like
+`1.2.3.4000` are left alone), and `email` requires a dotted TLD. Anything site-specific belongs in `regex`.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `patterns` | []string | `[]` | Built-ins to enable: `email`, `ipv4`, `credit_card` |
+| `regex` | []string | `[]` | Additional patterns (RE2 syntax). Every match is redacted |
+| `mode` | string | `mask` | `mask` (replace), `hash` (salted SHA-256 digest), or `remove` (delete) |
+| `replacement` | string | `[REDACTED]` | Replacement text in `mask` mode |
+| `hash_salt` | string | `""` | Salt for `hash` mode. Agents sharing a salt produce equal digests for equal inputs, which is what makes correlation possible without retaining the value |
+| `fields` | []string | `[]` | Restrict redaction to these field names. Empty = every field |
+| `skip_fields` | []string | `[]` | Never redact these fields. Wins over `fields` |
+| `skip_message` | bool | `false` | Leave the message untouched and redact only fields |
+
+`hash` mode preserves correlation: the same value always yields the same digest, so you can still count
+distinct users or join events without holding the identifier. Use a salt so the digests are not a
+rainbow-table lookup of the original value.
+
+```yaml
+- type: redact
+  patterns: [email, credit_card]
+  regex:
+    - 'token=[A-Za-z0-9]+'         # site-specific secrets
+  mode: mask
+  replacement: "[REDACTED]"
+  skip_fields: [host]              # never scrub the routing metadata
+```
+
 ---
 
 ## `outputs`
@@ -905,9 +985,9 @@ structured data — or as a JSON message body with `encoding: json`.
 | `endpoint` | string | *(required)* | `host:port` of the aggregator (logrok syslog-ng by default) |
 | `protocol` | string | `tcp` | `tcp` or `udp`. UDP sends **one datagram per message** (RFC 5426, no framing) — required for **hardware data diodes** (Waterfall/Owl pass UDP only) and plain `udp()` receivers. UDP is fire-and-forget: no delivery guarantee on the wire; pair with `sequence` for receiver-side gap detection |
 | `framing` | string | `newline` | **TCP only.** `newline` (one message per LF — what syslog-ng's `network()` source and most receivers expect) or `octet-counting` (RFC 6587 `LEN SP MSG`; preserves embedded newlines but needs an octet-counting-aware receiver, e.g. syslog-ng's `syslog()` source). Setting it with `protocol: udp` is a config error |
-| `sequence` | bool | `false` | add a `[seq@99999 session=".." n=".."]` SD element with a per-event monotonic counter. A receiver behind a one-way link detects **loss** (gaps in `n`) and **agent restarts** (`session` change). Counters are assigned at send time, so retried batches get fresh numbers — `n` detects gaps, not duplicates |
-| `max_datagram_size` | int | `8192` | **UDP only.** Datagrams are truncated to this many bytes (an over-MTU/oversized send would otherwise fail forever and wedge the spool drain). Raise it if your receiver accepts more |
-| `encoding` | string | `text` | `text` (message verbatim, structured fields as a `[logrok@99999 ...]` SD element) or `json` (the RFC 5424 envelope stays, but MSG is **one JSON object** — `timestamp`, `host`, `source`, `severity`, `facility`, `message`, `fields` — and the fields SD element is dropped, no duplication). Use `json` for receivers that parse JSON natively (syslog-ng `json-parser()`, Splunk, Logstash, Loki). Bonus: JSON escapes control characters, so **multi-line messages survive newline framing** as a single frame — no `octet-counting` receiver needed. The `sequence` SD element still applies. ⚠️ **Keep `text` when forwarding into logrok**: its field extraction reads the `[logrok@99999]` SD element, which `json` drops — `json` would land fields (incl. `agent_group`) unparsed inside the message |
+| `sequence` | bool | `false` | add a `[seq@66371 session=".." n=".."]` SD element with a per-event monotonic counter. A receiver behind a one-way link detects **loss** (gaps in `n`) and **agent restarts** (`session` change). Counters are assigned at send time, so retried batches get fresh numbers — `n` detects gaps, not duplicates |
+| `max_datagram_size` | int | `8192` | **UDP only.** Datagrams are truncated to this many bytes (an over-MTU/oversized send would otherwise fail forever and wedge the spool drain). A truncation counts `logrok_agent_udp_truncated_total` and logs a one-time WARN, so a too-small value is visible rather than silently cutting messages — raise it if your receiver accepts more |
+| `encoding` | string | `text` | `text` (message verbatim, structured fields as a `[logrok@66371 ...]` SD element) or `json` (the RFC 5424 envelope stays, but MSG is **one JSON object** — `timestamp`, `host`, `source`, `severity`, `facility`, `message`, `fields` — and the fields SD element is dropped, no duplication). Use `json` for receivers that parse JSON natively (syslog-ng `json-parser()`, Splunk, Logstash, Loki). Bonus: JSON escapes control characters, so **multi-line messages survive newline framing** as a single frame — no `octet-counting` receiver needed. The `sequence` SD element still applies. ⚠️ **Keep `text` when forwarding into logrok**: its field extraction reads the `[logrok@66371]` SD element, which `json` drops — `json` would land fields (incl. `agent_group`) unparsed inside the message |
 | `tls` | bool | `false` | enable TLS (**TCP only** — no DTLS; `protocol: udp` + `tls` is a config error) |
 | `ca_file` | string | system roots | CA bundle to **verify the server** (RootCAs) |
 | `cert_file` | string | `""` | client cert for **mTLS** (requires `key_file`) |
@@ -915,6 +995,11 @@ structured data — or as a JSON message body with `encoding: json`.
 | `server_name` | string | from `endpoint` | verification name / SNI override |
 | `cert_source` | string | `static` | `static` (use `cert_file`/`key_file`) or `enrolled` (present the control-plane-issued cert from `management.tls.mode: enrolled`; mutually exclusive with `cert_file`/`key_file`). The agent *presents* the cert; the receiver must verify it (`peer-verify`/`ca-file`) for enforcement |
 | `insecure_skip_verify` | bool | `false` | **DEV ONLY** — disables server verification |
+| `drain_pacing` | block | *(off)* | **Reconnect drain pacing** for this unacked transport. Omit → the spool drains at line rate (default). Set it when a high-volume plain-syslog feed can overrun a bounded receiver on reconnect: after an outage the durable spool would otherwise re-blast the whole backlog at once, and because plain syslog has **no delivery ack** the receiver's overflow drops are invisible to the agent (it can silently lose its own backlog). Pacing caps the drain rate and eases a recovered receiver back in. **Only for `syslog`/`snare`** (unacked); the acked outputs (`otlp`/`relay`, HEC-ack) are paced by their receiver's acknowledgment and ignore this. Sub-keys below |
+| `drain_pacing.rate_eps` | int | *(required in block)* | Steady events/sec cap while **draining a backlog** (0/omitted = unlimited, i.e. the block does nothing). Steady-state forwarding at or below this rate is never throttled |
+| `drain_pacing.slow_start` | bool | `true` | After each reconnect, start well below `rate_eps` and **double the rate every second** until the cap — so a just-recovered receiver is eased back in, not hit with the whole backlog at once. This is what breaks the receiver-restart-loop. Set `false` for a flat cap |
+| `drain_pacing.ramp_start_eps` | int | `rate_eps / 16` (min 1) | Initial post-reconnect rate when `slow_start` is on; doubles each second up to `rate_eps`. Must be ≤ `rate_eps` |
+| `drain_pacing.jitter` | bool | `true` | Add a small, per-agent random delay before resuming the drain after a reconnect, so a **fleet** of agents reconnecting to a recovered receiver at the same moment doesn't stampede it in lockstep |
 
 Framing defaults to **newline-delimited** (interoperates with logrok's syslog-ng and most receivers; switch to
 `octet-counting` only for a receiver that supports it). Structured `Fields` are emitted as RFC 5424

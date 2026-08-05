@@ -153,9 +153,9 @@ sudo /usr/local/bin/logrok-universal-agent-uninstall
 Releases ship binaries for `solaris-amd64`, `aix-ppc64`, `freebsd-{amd64,arm64}`, `openbsd-amd64`, and
 `netbsd-amd64` (pure-Go cross-builds; file tail + syslog-in/out + spool work identically — there's no
 platform-specific code in those paths). FreeBSD notably covers pfSense/OPNsense/TrueNAS-class appliance
-hosts. **`solaris-amd64` is runtime-verified** — the full test suite runs on real Solaris 11.4 hardware in
-the release verification. **AIX and the BSDs are cross-compiled and vetted but not yet runtime-verified** (no
-such hardware yet — treat accordingly). Binary only: bring your own service integration (SRC `mkssys` on AIX,
+hosts. **`solaris-amd64`, `freebsd-amd64`, `openbsd-amd64` and `netbsd-amd64` are runtime-verified** — the full
+test suite runs on each real OS (Solaris 11.4, FreeBSD 15.1, OpenBSD 7.9, NetBSD 11.0) as part of the release
+verification. **AIX is cross-compiled and vetted but not yet runtime-verified** — treat accordingly. Binary only: bring your own service integration (SRC `mkssys` on AIX,
 SMF manifest on Solaris, `rc.d` on the BSDs). If you run an AIX/BSD estate (banks: your Power boxes), we're
 looking for design partners — your feedback drives those to runtime-verified status too. (HP-UX is not
 possible: Go has no HP-UX port.)
@@ -530,7 +530,7 @@ outputs:
   - type: syslog
     endpoint: "diode-ingress:514"
     protocol: udp        # one datagram per message (RFC 5426); no framing, no TLS
-    sequence: true       # [seq@99999 session=".." n=".."] SD per event
+    sequence: true       # [seq@66371 session=".." n=".."] SD per event
 ```
 
 What to know about the trade-offs on a one-way link:
@@ -545,6 +545,43 @@ What to know about the trade-offs on a one-way link:
   every hop (diode included) handles larger datagrams/fragmentation.
 - **Management plane**: leave `management.endpoint` empty on the OT side — config-pull and heartbeat need a
   return path. Manage the agent's config file through your normal OT change process (or a signed bundle).
+
+### High-volume reconnects — pace the spool drain
+
+Plain syslog (TCP or UDP) has **no delivery acknowledgment**, so the receiver can't tell the agent to slow
+down. After a receiver outage the agent's disk spool holds the backlog and, on reconnect, drains it **as fast
+as the link allows**. Into a **bounded** receiver at high volume that can be a problem: the burst refills the
+receiver's queue faster than it drains, it sheds the overflow, and — with no ack — those drops are **invisible
+to the agent**, which believes it delivered everything. Worst case the receiver keeps falling over in a
+reconnect loop.
+
+If that's your situation (a busy plain-syslog feed into a receiver with a fixed queue), turn on **drain
+pacing** — off by default, so nothing changes unless you ask for it:
+
+```yaml
+outputs:
+  - type: syslog
+    endpoint: "collector:16575"
+    drain_pacing:
+      rate_eps: 20000      # cap the backlog drain at 20k events/sec
+      # slow_start: true   # default — start low after a reconnect, double each second up to rate_eps
+      # ramp_start_eps: …  # default rate_eps/16 — the initial post-reconnect rate
+      # jitter: true       # default — stagger a fleet so agents don't stampede a recovered receiver at once
+```
+
+- **`rate_eps`** caps how fast the spool drains **while there's a backlog**; steady-state forwarding at or
+  below that rate is untouched.
+- **`slow_start`** (on by default) eases a just-recovered receiver back in — the drain starts well below
+  `rate_eps` and doubles every second until it reaches the cap. This is what actually breaks a
+  restart-every-90-seconds loop, not the flat cap alone.
+- **`jitter`** (on by default) staggers a **fleet**: when many agents reconnect to a recovered receiver at the
+  same instant, each waits a small random moment first so they don't all hit it together.
+- **Only for `syslog`/`snare`** (the unacked outputs). The acknowledged transports — `relay` and `otlp`, and
+  HEC with indexer-ack — are already paced by the receiver's acknowledgment, so they ignore `drain_pacing`;
+  adding it there would only slow legitimate recovery.
+
+Leave it off unless you've actually seen a receiver struggle on reconnect — an unbounded receiver, or a
+volume the receiver comfortably absorbs, wants the fast unbounded drain.
 
 ### Loss-free hops — the ack'd relay transport
 
@@ -727,7 +764,7 @@ visible in your SIEM as `extra['suppress_count']` (or the equivalent field path 
 | `sample` | Keeps 1-in-N events by `ratio`, optionally keyed for consistent sampling | Deterministic: reduction = `1 − ratio` (not data-dependent) |
 | `trim_fields` | Drops/truncates fields and message bytes; never drops events | Scales with **field/message verbosity** — chatty debug metadata and long messages shrink the most; wire bytes drop, event count doesn't |
 
-**Measured numbers (data-dependent — cite the dataset, don't treat as universal):** benchmarked 2026-06-24 with
+**Measured numbers (data-dependent — cite the dataset, don't treat as universal):** benchmarked with
 the released agent binary against two real corpora — 151k lines of host `journald` logs and a
 150k-line real Kubernetes container-log stream from a production cluster — via `filetail → processor(s) → syslog`
 with event/byte counts read from `/metrics` and the receiving sink:
@@ -837,6 +874,40 @@ configuration error caught at startup.
 a `…` marker (3 bytes). A truncated value is up to N+3 bytes — not a hard N-byte cap — so set your SIEM
 or syslog receiver's line-length limit accordingly.
 
+### Redacting sensitive values before they leave the host
+
+`redact` rewrites matching substrings in the message and field values. It runs on the endpoint that produced
+the event, so a value you must not retain never crosses the wire — masking at the collector still means the
+secret travelled and was written down upstream.
+
+```yaml
+processors:
+  - type: redact
+    patterns: [email, credit_card]     # built-ins
+    regex:
+      - 'token=[A-Za-z0-9]+'           # anything site-specific
+    skip_fields: [host]                # don't scrub routing metadata
+```
+
+Built-ins are deliberately conservative, because an over-firing pattern destroys data nobody downstream can
+recover or even identify: `credit_card` is Luhn-checked rather than "any 16 digits", `ipv4` range-checks each
+octet (so `999.1.1.1` and a version string like `1.2.3.4000` are left alone), and `email` requires a dotted
+TLD. If a built-in misses something specific to your estate, add a `regex` entry rather than loosening it.
+
+Three modes:
+
+| Mode | Result | Use when |
+|---|---|---|
+| `mask` (default) | `[REDACTED]` (configurable via `replacement`) | You only need the value gone |
+| `hash` | Salted SHA-256 digest | You still need to **count or correlate** — the same input always gives the same digest, so "how many distinct users hit this error" survives redaction |
+| `remove` | Deleted entirely | The value's presence is itself noise |
+
+Set `hash_salt` in `hash` mode so the digests aren't a rainbow-table lookup of the original value. Agents
+sharing a salt produce matching digests, which is what makes fleet-wide correlation work.
+
+A `redact` step with neither `patterns` nor `regex` is a configuration error caught at startup — silently
+passing sensitive data through while looking configured is the one failure this module must not have.
+
 ## Kubernetes
 
 Deploy the agent as a node-level container-log collector and/or a syslog gateway via Helm:
@@ -924,20 +995,53 @@ plain listener — the mTLS listener is additive.)
 - **Metrics:** with `service.metrics_listen` set, scrape `http://<host>:<port>/metrics`. Key signals:
   `logrok_agent_events_in_total` / `events_out_total` (should both climb), `events_dropped_total` (should stay
   flat), `buffer_depth` (rises during an outage, drains after), `backpressure_waits_total` (climbs when the spool
-  is full under `when_full: block`), `last_forward_timestamp_seconds` (recent).
+  is full under `when_full: block`), `spool_write_errors_total` (should stay flat — a climbing value means the
+  spool disk is failing a write/fsync; the agent retries and never drops those events, so a persistent fault
+  backpressures the inputs — treat it as "the spool disk needs attention"), `last_forward_timestamp_seconds`
+  (recent).
 - **License posture:** the same endpoint exposes `logrok_agent_license_state{state="core|licensed|grace|degraded"}`
   (a 0/1 series per state — alert on `state="grace"` or `state="degraded"` being 1),
   `logrok_agent_license_grace_days_left` (counts down while lapsed features run in the grace window), and
   `logrok_agent_license_info{tier,enforced}`. A centrally managed agent also reports the same posture to the
-  control plane on every heartbeat.
+  control plane on every heartbeat, and **picks up license changes automatically on its next heartbeat** — no
+  re-enrollment or restart. If an agent was enrolled before its license was issued, or its entitlement changes
+  (renewal, tier change, grace extension), the new terms apply on the next beat via a brief automatic reload
+  (`entitlement refreshed via heartbeat; reloading to apply it` in the logs); an unchanged license causes no reload.
 - **Logs:** the agent logs structured JSON to stdout (`service.log_level`). A healthy start logs
   `agent starting` and `metrics endpoint listening` (if enabled).
 - **Healthy =** `events_out` climbing, `buffer_depth` ~0, `events_dropped` 0.
+
+## Licensing
+
+The agent has a free **Core** tier (file tail, syslog/journald/HTTP inputs, parsers, TLS
+syslog output, metrics — no license needed, at any scale) and a paid **Apex** tier for the
+gated capabilities (Windows Event Log, disk spool, fleet management, edge reduction,
+enrolled mTLS, relay, Kubernetes container logs, macOS `oslog`, UDP/data-diode output,
+extended OS platforms). Full model, license-file format, and state machine:
+[LICENSING.md](LICENSING.md).
+
+The short operator version:
+
+- **Managed by logrok?** Nothing to do — enrollment delivers the entitlement automatically.
+- **Standalone with Apex features?** Set `licensing.license_file` to your issued `.lic`
+  ([reference](CONFIGURATION.md)) and (re)start.
+- **Core-only config?** No license, no warnings, nothing changes — ever.
+- **When a license expires**, Apex features keep running through a **grace window**
+  (default 30 days; your license may set its own) with escalating log warnings and a
+  countdown (`logrok_agent_license_grace_days_left`). After grace ends — or if the config
+  uses Apex features the entitlement never covered — those modules are **disabled at load**
+  (degrade-to-Core): the agent keeps running everything Core, logs each removal, and
+  restores the features immediately once a valid license is in place and the agent restarts
+  or reloads. The agent never exits or blocks Core forwarding over licensing.
+- **Watch it:** `logrok_agent_license_state{state=...}` on `/metrics` (alert on `grace` or
+  `degraded` being 1); managed agents also report the same posture on every heartbeat.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| An input/processor/output from your config is missing after an upgrade or restart, and startup logs `licensing: degraded to Core — unlicensed Apex features disabled` | the config uses Apex capabilities without a covering license (or the license expired and its grace window ended) | install/renew the license (`licensing.license_file`, or enroll with a logrok control plane) and restart — the features come back immediately. For a controlled transition window, `LICENSE_ENFORCE=0` on the agent process runs them with warnings instead (see [LICENSING.md](LICENSING.md)) |
+| Startup logs `licensing: Apex features are in the grace window` with `days_left` | the license expired; the grace window is running | renew before `days_left` reaches 0 to avoid degrade-to-Core; watch `logrok_agent_license_grace_days_left` |
 | `buffer_depth` rising, `events_out` flat | aggregator unreachable / TLS rejected | check `endpoint`, firewall, and the TLS material; logs show "output unavailable, buffering" |
 | Spooled events not draining after the aggregator recovered | the output's writes are still failing (stale DNS, a proxy accepting connections the backend can't service, TLS/mTLS rejection) | the agent warns `spool drain blocked` with the exact write error while the spool can't drain (first failure immediately, then every 30s) and logs `spool drain resumed` when delivery restarts — read the error in that warning; delivery retries indefinitely, nothing is dropped while spool capacity remains |
 | TLS handshake / "unknown authority" | wrong/missing `ca_file` | point `ca_file` at the CA that signed the aggregator cert |
@@ -964,7 +1068,7 @@ logrok is one possible destination. When forwarding into a logrok deployment:
 - Point the `syslog` output at logrok's **syslog-ng front door** (`endpoint`); enable `tls`/mTLS as above.
   logrok's compose stack listens on **TCP/UDP 16575** by default (host-remappable — check your deployment);
   that port is a logrok convention, not a syslog standard.
-- Keep the default `encoding: text` — logrok extracts structured fields from the `[logrok@99999]` SD
+- Keep the default `encoding: text` — logrok extracts structured fields from the `[logrok@66371]` SD
   element, which `encoding: json` drops (fields would arrive unparsed inside the message).
 - For central fleet management, install/operation of the platform side, and viewing the forwarded logs, see the
   **[logrok platform documentation](https://github.com/logiqum/logrok)**.
@@ -973,11 +1077,12 @@ logrok is one possible destination. When forwarding into a logrok deployment:
 
 ## Maturity & what's coming
 
-**Available now — inputs:** Windows Event Log (verified end-to-end on real Windows hardware, incl. Sysmon;
-XPath filtering, saved `.evtx`/`.evt` file reading), Windows ETW real-time trace sessions (`etw` —
-manifest-provider TDH decoding; runtime-verified on real Windows hardware), Windows WMI/CIM (`wmi` — system
-inventory & state via WQL polling; compile+unit-verified, runtime-validated on Windows hardware), file tail
-(globs, rotation, multiline, restart-resume, UTF-16 encodings, and container-log parsing via
+**Available now — inputs:** Windows Event Log (`windows_eventlog` — verified end-to-end on real Windows
+hardware, incl. Sysmon; XPath filtering, saved `.evtx`/`.evt` file reading), Windows ETW real-time trace
+sessions (`etw` — manifest-provider TDH decoding; runtime-verified on real Windows hardware), Windows WMI/CIM
+(`wmi` — system inventory & state via WQL polling; compile+unit-verified, runtime-validated on Windows
+hardware), file tail (`filetail` — globs, rotation, multiline, restart-resume, UTF-16 encodings, and
+container-log parsing via
 `format: cri|docker|auto` — see [Kubernetes](#kubernetes)), systemd `journald` (Linux), `linux_audit` kernel
 audit trail (Linux; multi-record reassembly + EXECVE/PROCTITLE hex-decoding, file-follow or CAP_AUDIT_READ
 netlink multicast — verified against a live auditd host), `oslog` macOS unified log (macOS), `syslog_in`
@@ -986,9 +1091,12 @@ ingress for webhooks/IoT, TLS/mTLS + bearer token), `mqtt_in` (MQTT 3.1.1 subscr
 and `relay_in` (the receiving end of the ack'd agent→agent transport).
 
 **Processors:** `add_fields` / `filter` / `expr` (conditional set/drop/rename),
-`parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → structured fields), and the edge
+`parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → structured fields), the edge
 volume-reduction set `sample` / `throttle` / `dedup` / `trim_fields` — see
-[Reduce volume at the edge](#reduce-volume-at-the-edge).
+[Reduce volume at the edge](#reduce-volume-at-the-edge) — and `redact`, which removes sensitive values
+(built-in email / IPv4 / Luhn-checked card patterns, plus your own) on the endpoint, before they cross the
+wire, with a salted-hash mode that keeps values correlatable without retaining them — see
+[Redacting sensitive values](#redacting-sensitive-values-before-they-leave-the-host).
 
 **Outputs:** `syslog` (RFC 5424 with TLS/mTLS over TCP, UDP diode mode, JSON encoding), `snare` (the legacy
 Snare/"MSWinEventLog" format for a SIEM expecting an NXLog/Snare feed), `relay` (ack'd reliable agent→agent
