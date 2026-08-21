@@ -15,8 +15,9 @@ reliability-critical key (`dead_letter_dir`, `on_reject`, `ack_timeout`, `use_ac
 the default. The config still loads (an unknown key is not fatal), so a stale key on upgrade won't stop the
 agent — but the warning tells you to fix it.
 
-**Status key:** ✅ implemented · ◐ partial · 🔜 planned. Pipeline: `inputs → processors → output → buffer (on
-write-fail)`. v1 ships a single output.
+**Status key:** ✅ implemented · ◐ partial · 🔜 planned. Pipeline: `inputs → processors → outputs → buffer (on
+write-fail)`. Multiple outputs fan out — every destination gets every event, each with its own spool (see
+[`outputs`](#outputs)).
 
 ---
 
@@ -26,7 +27,7 @@ write-fail)`. v1 ships a single output.
 |---|---|---|---|---|
 | `mode` | string | `service` | ✅ | `service` (Windows Service / daemon) or `standalone` (foreground) |
 | `log_level` | string | `info` | ✅ | `debug` \| `info` \| `warn` \| `error` (structured `slog` JSON) |
-| `metrics_listen` | string | `""` (off) | ✅ | e.g. `127.0.0.1:9090` → serves Prometheus text at `/metrics`. **Bind localhost** unless scraped remotely. |
+| `metrics_listen` | string | `""` (off) | ✅ | e.g. `127.0.0.1:9090` → serves Prometheus text at `/metrics` **and the live-sampling endpoint `/tap`** (see [Watching live events](USER-GUIDE.md#watching-live-events--tap)). **Bind localhost** unless scraped remotely — `/tap` is refused outright on a non-loopback bind, because it exposes event content. |
 
 **Metrics exposed:** `logrok_agent_events_in_total`, `events_out_total`, `events_dropped_total`,
 `backpressure_waits_total`, `spool_meta_write_errors_total`, `spool_write_errors_total`,
@@ -60,6 +61,8 @@ installs). Auth uses the logrok control-plane headers: `X-Api-Key` + `X-Tenant-S
 |---|---|---|---|---|
 | `endpoint` | string | `""` | ✅ | `""` = unmanaged. Use HTTPS in production — the api-key is a bearer credential |
 | `enrollment_token` | string | `""` | ✅ | **one-time** secret; exchanged at first start for `agent_id` + `api_key` (retried with backoff — collection runs regardless). Credentials persist in `state_path`, so the token can be removed after enrollment |
+| `endpoint` value `auto` | string | — | ✅ | **discovery**: browse the local segment (mDNS/DNS-SD `_logrok-cp._tcp.local`) for a control plane instead of hard-coding a URL. Opt-in only — an agent with an endpoint written down is never re-pointed by the network. Discovery **locates, it never authenticates**: the enrollment token and TLS still prove the control plane, so a rogue advertiser only gets ignored. Finding nothing is not an error: the agent runs unmanaged for that run and says so. |
+| `enrollment_bundle` | string | `""` | ✅ | path to a signed **air-gap enrollment bundle** (identity + entitlement + optional starting config), verified offline against the embedded issuer key. Adopted once (anchored by the bundle's own id) and then inert — safe to leave the media mounted. See [Enrolling an agent with no path to the control plane](USER-GUIDE.md#enrolling-an-agent-with-no-path-to-the-control-plane-bundles). |
 | `state_path` | string | `agent-state.json` next to the config | ✅ | where enrollment credentials + applied config version persist (atomic, `0600`). Secrets live here, never in the config file |
 | `api_key` | string | `""` | ✅ | manual provisioning alternative to enrollment; sent as `X-Api-Key` (enrolled state takes precedence) |
 | `tenant_slug` | string | `""` | ✅ | sent as `X-Tenant-Slug` |
@@ -108,8 +111,8 @@ normally, but it accepts no new events. You will see one warning at start and a 
 `spool drain complete` line once the existing backlog has been delivered. While the agent is drain-only,
 Core forwarding is unaffected — events go straight to the output as usual; they are only lost if the output
 is unavailable, and each such loss is counted in `logrok_agent_events_dropped_total` and logged, never
-silent. The spool directory and its contents are never deleted. Enforcement is off by default today; set
-`LICENSE_ENFORCE=1` to exercise this behavior for a single run.
+silent. The spool directory and its contents are never deleted. This behavior applies whenever licensing
+enforcement withdraws the spool capability (see [LICENSING.md](LICENSING.md)).
 
 ### Tamper-evident chaining (on by default)
 
@@ -373,7 +376,7 @@ PowerShell redirects and `wevtutil` exports). If a program logs to a file, this 
 | `start_at` | string | `end` | `end` (new lines only) or `beginning` (whole file) — applies only when there is no saved checkpoint for the file |
 | `state_path` | string | `""` | offset-checkpoint file for resume-after-restart. Empty = no persistence (restart re-applies `start_at`). |
 | `poll_interval` | duration | `500ms` | how often to poll for new data |
-| `fingerprint_size` | int | `1024` | bytes hashed to identify a file across rename-rotation. A file smaller than this has no stable identity yet, but once it grows to this size while being tailed its fingerprint is adopted and its resume checkpoint is persisted — so a file that started sub-`fingerprint_size` still resumes correctly after a restart (no data loss) |
+| `fingerprint_size` | int | `1024` | bytes hashed to identify a file across rename-rotation. A file smaller than this has no rename-stable identity yet; its resume checkpoint is still persisted, guarded by a hash of everything already consumed — on restart the agent resumes exactly where it stopped if (and only if) the file's consumed bytes are unchanged, and otherwise re-applies `start_at` (duplication at worst, never loss). Once the file grows to this size its full fingerprint is adopted and the checkpoint follows it |
 | `facility` | int | `16` | syslog facility for emitted events (a file has none); `16`=local0, matching eventlog/journald |
 | `severity` | int | `6` | syslog severity for emitted events (`6`=info) |
 | `encoding` | string | `utf-8` | `utf-8`, `utf-16le`, `utf-16be`, or `auto` (per-file BOM sniff — a mixed UTF-8/UTF-16 glob just works). UTF-16 is the Windows norm (PowerShell redirects, wevtutil exports); decoded to UTF-8 at the edge, BOM stripped, CRLF trimmed. Newline detection is code-unit-aware (a `0x0A` byte inside a character never splits a line); checkpoints stay raw byte offsets |
@@ -550,6 +553,147 @@ jittered exponential backoff (cap 30s) and re-subscribes; on shutdown it sends a
 `PUBLISH` from the broker is emitted best-effort with a one-shot warning and **no** PUBREC handshake (the broker
 may redeliver it) — subscribe at QoS 0 or 1 for defined semantics.
 
+### `snmptrap_in` ✅ — cross-platform (SNMP trap receiver; OT/network devices) — **Apex**
+
+Listens for SNMP **traps and informs** (UDP, IANA port 162) from network and OT devices — switches,
+firewalls, UPSes, PLC gateways — and turns each notification into one event. Supports **v1**, **v2c**
+and **v3 (USM** — per-user authentication and privacy**)** natively: no `snmptrapd` side-daemon, no
+second config. An **InformRequest is acknowledged** on receipt, so senders using informs stop
+retrying — and from there the event has the agent's usual durability (disk spool, at-least-once
+forwarding).
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `listen` | string | `0.0.0.0:162` | UDP listen address. Port 162 needs `CAP_NET_BIND_SERVICE` (or root); use a >1024 port and redirect if the agent runs unprivileged |
+| `versions` | []string | `[v1, v2c]` | accepted SNMP versions, any of `v1`, `v2c`, `v3`. Adding `v3` requires `v3_users` |
+| `community` | []string | `[]` (accept any) | v1/v2c community allow-list; a mismatching community is rejected and counted. Communities are plaintext on the wire — prefer v3 where devices support it |
+| `v3_users` | list | `[]` | USM users for v3: each entry `{username, auth_protocol, auth_password, priv_protocol, priv_password}`. One user entry serves any number of sending engines with that user (keys are localized per sender engine automatically) |
+| `v3_users[].username` | string | *(required)* | USM security name |
+| `v3_users[].auth_protocol` | string | *(required)* | `sha256` (recommended), `sha`, `sha224`, `sha384`, `sha512`, or `md5` (legacy) |
+| `v3_users[].auth_password` | string | *(required)* | authentication passphrase |
+| `v3_users[].priv_protocol` | string | `""` (authNoPriv) | `aes` / `aes192` / `aes256` (recommended) or `des` (legacy); empty = authenticated but unencrypted |
+| `v3_users[].priv_password` | string | `""` | privacy passphrase (required when `priv_protocol` is set) |
+| `oid_names` | map | `{}` | optional OID → name labels, e.g. `{"1.3.6.1.6.3.1.1.5.3": linkDown}` — a matching trap gains a `trap_name` field and varbind keys use the name. No MIB compiler needed; full MIB semantics stay downstream |
+| `queue_size` | int | `1024` | bounded hand-off queue between the UDP listener and the pipeline; overflow during a trap storm is counted and dropped (UDP cannot be back-pressured) |
+| `source` | string | `snmptrap_in` | `Event.Source` label stamped on every event |
+| `facility` | int | `23` (local7) | syslog facility for received traps |
+| `severity` | int | `5` (notice) | syslog severity for received traps |
+
+Each trap becomes one event: `Host` is the sender (for v1, the trap's agent-address field — relays
+preserve the true origin), `Message` is the trap OID (or its `oid_names` label) plus a short varbind
+summary, and every varbind lands as a `vb_<oid>` field with the value rendered to a stable string
+(integers decimal, strings UTF-8 or hex, OIDs dotted). v1 traps are translated to v2c trap OIDs the
+standard way (RFC 2576), so a mixed v1/v2c estate produces uniform fields. `sysuptime`, the
+`snmp_version`, and (for informs) `inform: true` ride along as fields. Traps are UDP: delivery to
+the agent has no protocol guarantee (use informs where the device supports them — those are
+acknowledged); once accepted, the pipeline's usual durability applies. Verified against the
+net-snmp reference tools across the v3 auth/priv matrix in the test battery.
+
+### `modbus_in` ✅ — cross-platform (Modbus TCP; OT/PLC register polling) — **Apex**
+
+Polls **Modbus TCP** devices — PLCs, RTUs, drives, meters, and the serial-to-TCP gateways that front
+them — and emits **events, not register streams**. Modbus registers are time-series telemetry; a
+1 Hz poll of fifty registers is millions of rows a day that no SIEM rule will ever read. This input
+watches the registers you name and forwards only what a log platform can act on: a value that
+**changed**, a value that **crossed a bound**, and a device that **stopped answering**. A quiet plant
+produces almost no events, which is the point.
+
+**Read-only by construction.** Only the four Modbus read function codes (`0x01`–`0x04`) exist in the
+agent. The write codes are not implemented and not merely disabled by configuration — there is no code
+path through which the agent can command a PLC, and an automated check fails the build if one is ever
+added.
+
+**Two transports.** `transport: tcp` (the default) speaks Modbus TCP to a device or gateway.
+`transport: rtu` speaks Modbus RTU over a serial line — an RS-485/RS-232 port on the collecting
+host — for equipment that has no Ethernet at all. Everything above the wire is identical: the same
+watches, the same events, the same read-only guarantee.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `targets` | list | *(required)* | the devices to poll; at least one. Each device is polled independently, on its own connection and schedule |
+| `targets[].transport` | string | `tcp` | `tcp` for Modbus TCP, `rtu` for Modbus RTU over a serial line. Chooses which of `address`/`device` is required; setting the wrong one is a config error rather than a silent no-op |
+| `targets[].address` | string | *(required for `tcp`)* | device `host:port` (Modbus TCP is usually port 502) |
+| `targets[].device` | string | *(required for `rtu`)* | serial device — e.g. `/dev/ttyUSB0`, `/dev/ttyS0`, or `COM3` on Windows |
+| `targets[].baud` | int | `19200` | line rate: 1200, 2400, 4800, 9600, 19200, 38400, 57600 or 115200. The Modbus default is 19200 |
+| `targets[].data_bits` | int | `8` | must be 8. Modbus RTU is a binary encoding; 7 data bits is Modbus ASCII, which this input does not implement |
+| `targets[].parity` | string | `even` | `even` (the Modbus default), `odd`, or `none` |
+| `targets[].stop_bits` | int | `1`, or `2` when `parity: none` | the specification keeps the character frame 11 bits wide, so a line without a parity bit uses two stop bits. Override only if your device disagrees |
+| `targets[].unit_id` | int | `1` | Modbus unit / slave id (0–255). Gateways use it to select the device behind them |
+| `targets[].poll_every` | duration | `5s` | how often to poll this device. Floor of `100ms` — faster is register streaming, which this input deliberately does not do |
+| `targets[].timeout` | duration | `3s` | per-request dial/read timeout. Must not exceed `poll_every`, or polls would overlap on a slow device |
+| `targets[].address_base` | string | `protocol` | how register numbers are written. `protocol` = the zero-based address that goes on the wire. `data_model` = the 5-digit vendor notation (`4xxxx` holding, `3xxxx` input, `1xxxx` discrete, `0xxxx` coil), so `holding:40012` means the twelfth holding register. See the addressing note below |
+| `targets[].max_read_gap` | int | `8` | how many unwatched registers may be read to bridge two watches into one request. Higher = fewer requests, more registers read; `0` = never bridge |
+| `targets[].watches` | list | *(required)* | the registers to observe on this device; at least one |
+| `targets[].watches[].name` | string | *(required)* | the watch's name; unique per device, and the key every event carries |
+| `targets[].watches[].register` | string | *(required)* | `<kind>:<address>` where kind is `coil`, `discrete`, `input` or `holding` — e.g. `holding:11`, `coil:12` |
+| `targets[].watches[].type` | string | `bool` for bit kinds, `int16` for word kinds | how to read the value: `bool`, `int16`, `uint16`, `int32`, `uint32`, `float32`. The 32-bit types read two consecutive registers |
+| `targets[].watches[].scale` | float | `1` | raw value × scale = the engineering value used in events and threshold tests (e.g. `0.1` for a tenths-of-a-bar register) |
+| `targets[].watches[].word_order` | string | `big` | register order for 32-bit types: `big` (high word first) or `little` (the word swap many devices use). Rejected on 16-bit types |
+| `targets[].watches[].on_change` | bool | `false` | emit a `state_change` event whenever this value changes |
+| `targets[].watches[].deadband` | float | `0` | with `on_change`, suppress changes smaller than this — an analog-noise guard. The reference value does **not** advance while inside the band, so a slow drift is still reported once it accumulates past it. Needs `on_change` |
+| `targets[].watches[].threshold` | map | *(none)* | bounds on a numeric value: `{above: <n>}`, `{below: <n>}`, or both. Crossing a bound emits a `threshold` event, and returning inside emits another |
+| `targets[].watches[].threshold.above` | float | *(none)* | emit when the value goes strictly **above** this |
+| `targets[].watches[].threshold.below` | float | *(none)* | emit when the value goes strictly **below** this |
+| `snapshot_every` | duration | `0` (off) | optional slow-cadence baseline: one `snapshot` event per device carrying every watch's current value, for audit and trend anchoring. Minimum `1m` — a snapshot is a baseline, not a stream |
+| `emit_initial_snapshot` | bool | `false` | with `snapshot_every` set, also emit a snapshot on the first successful poll (a fleet restart then re-baselines immediately) |
+| `failures_before_unavailable` | int | `2` | consecutive failed polls before an `availability` event is emitted, so one dropped packet is not an outage |
+| `queue_size` | int | `256` | bounded hand-off queue between the pollers and the pipeline; overflow is counted and dropped rather than stalling every device's schedule |
+| `source` | string | `modbus_in` | `Event.Source` label stamped on every event |
+| `facility` | int | `16` (local0) | syslog facility for emitted events |
+| `severity` | int | `5` (notice) | baseline syslog severity. Threshold entry raises to `4` (warning) and a device that stops answering to `3` (error) |
+
+**Events.** Every event carries `modbus.event` (the kind), `modbus.address` (the `host:port` or the
+device path), `modbus.transport` (`tcp` or `rtu`), and `modbus.unit_id`;
+`Host` is the device. The four kinds, carried in the `modbus.event` field:
+
+- **state_change** — a watched value changed (past its `deadband`, if set).
+  Adds `modbus.watch`, `modbus.register`, `modbus.old`, `modbus.new`.
+- **threshold** — a watched value crossed a bound, or came back inside.
+  Adds `modbus.watch`, `modbus.register`, `modbus.value`, `modbus.bound` (`above` or `below`),
+  `modbus.limit`, and `modbus.state` (`entered` or `cleared`).
+- **availability** — the device stopped answering reads, or started again.
+  Adds `modbus.state` (`down` or `up`), `modbus.fault` (`transport` = unreachable, `protocol` = the
+  device answered but refused the read), and `modbus.reason`.
+- **snapshot** — the `snapshot_every` cadence elapsed.
+  Adds one `modbus.value.<watch>` field per watch.
+
+**The first poll is silent.** A successful first poll records the device's state and emits nothing, so
+restarting the agent does not report every register in the plant as having just changed. Threshold
+state is seeded the same way: a value already out of bounds at startup does not re-alarm, but coming
+back inside is still reported.
+
+**Register addressing — the one thing to get right.** Vendor manuals are written in the 5-digit *data
+model* notation (`40012`), while the wire uses a zero-based *protocol* address (`11` for that same
+register). Both are supported, but you must say which you are writing: leave `address_base` at
+`protocol` and give protocol addresses, or set it to `data_model` and paste the vendor's numbers
+unchanged. If a protocol-base config contains a number sitting in its own kind's data-model band
+(`holding:40012`, say), the agent logs a warning naming the fix at startup — it cannot reject it,
+because that is also a legal protocol address.
+
+**Politeness.** OT devices are frequently single-threaded and fragile. Each device gets one connection
+with one request in flight at a time; adjacent watches are coalesced into as few reads as the protocol's
+per-request ceilings allow (a run of eight adjacent registers costs one read, not eight); and
+`poll_every` has a hard floor. A device that stops answering is retried on the normal schedule, not
+hammered.
+
+**Serial lines (`transport: rtu`).** A few things differ from TCP, all of them inherent to serial:
+
+- **One device at a time per line.** Each configured target owns its serial port exclusively — that
+  is what RS-485 multi-drop requires, since two masters on one line corrupt each other's frames. To
+  poll several unit ids on one physical line, that is a single target per unit id only if they are
+  on *different* ports; a shared line with several units is not supported today.
+- **Integrity rests entirely on the CRC.** RTU frames carry no length field and no transport
+  checksum underneath, so a corrupted frame is caught by its CRC-16 and the poll is failed rather
+  than a wrong value being reported. Persistent CRC failures raise the same `availability` event as
+  an unreachable device, with the reason naming the CRC.
+- **The line is resynchronised before every request**, so one bad exchange cannot leave every later
+  reply shifted by a frame.
+- **Permissions.** The agent must be able to open the device. On Linux that usually means adding its
+  service user to the `dialout` group; a permission failure is reported at startup, not silently.
+
+**Optional build.** `modbus_in` ships in the standard binary. A reduced-surface build that omits it
+entirely (smaller SBOM and attack surface) is available on request for regulated deployments.
+
 ### `journald` ✅ *(Linux only)*
 Reads the systemd journal by following `journalctl -o json` as a subprocess (keeps the binary static + cgo-free
 — an internal architecture decision). On non-Linux builds this is a stub that errors if started. The JSON field
@@ -566,7 +710,8 @@ real journal** on every CI run.
 
 Maps `PRIORITY`→severity, `SYSLOG_FACILITY`→facility (default local0/16), `_HOSTNAME`→host,
 `_SYSTEMD_UNIT`/`SYSLOG_IDENTIFIER`→`journald:<unit>` source, `__REALTIME_TIMESTAMP`→timestamp, plus
-`unit`/`pid`/`syslog_identifier`/`boot_id` fields. Resume via `cursor_file` is bounded-dup at the crash boundary
+`unit`/`pid`/`uid`/`syslog_identifier`/`boot_id` fields (`uid` = the journal's kernel-verified `_UID` sender —
+the user-traceability field compliance mappings reference). Resume via `cursor_file` is bounded-dup at the crash boundary
 (checkpoint trails the forwarded send — a crash replays the unsaved tail, never skips it; no entry ack — see
 the at-least-once note under [`buffer`](#buffer)). The checkpoint is deliberately **not** journalctl's `--cursor-file`: in follow mode
 journalctl only persists that on a graceful exit it never gets under service management (verified on
@@ -837,7 +982,27 @@ but `"*"` must be the only entry in the list — mixing it with other fields is 
   keep_if: 'fields.event_id == "4625"'   # account-lockout events always pass
 ```
 
-#### `throttle` ✅ — per-key rate cap
+#### `quota` ✅ — hard daily volume cap — **Apex**
+
+Caps a pipeline's daily volume: a per-UTC-day budget in events and/or approximate bytes; events
+over budget are **dropped and counted** until the day rolls over. The blunt instrument for "this
+source must never cost more than X/day" — pair with [`sample`](#sample--)/[`throttle`](#throttle--)
+for shapelier reduction. Exempt events (`keep_min_severity` / `keep_if`) always pass and consume
+no budget — a volume cap must never swallow page-worthy events.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `max_events` | int | `0` (off) | events admitted per UTC day; at least one of the two budgets must be > 0 |
+| `max_bytes` | int | `0` (off) | approximate bytes admitted per UTC day (pre-encoding: message + fields + host + source — a dial, not an invoice) |
+| `suppress_count` | bool | `true` | the first event admitted after budget-drops carries `quota_dropped` / `quota_dropped_bytes` fields, so the gap is visible downstream |
+| `keep_min_severity` | int | *(off)* | events at or above this urgency (numerically ≤, syslog order) bypass the budget entirely |
+| `keep_if` | string | `""` | expression (the filter grammar); matching events bypass the budget |
+
+Two honest caveats, by design: the window is the **UTC calendar day** (tumbling), and the spent
+budget is **in-memory — an agent restart refills it**. Treat the cap as an operating dial, not a
+billing guarantee.
+
+### `throttle` ✅ — per-key rate cap
 
 Allows at most `max` events per `window` per key (or globally when `key` is omitted). Excess events in the
 window are dropped. The next event that passes after a suppressed window carries `suppress_count` (by default).
@@ -865,6 +1030,48 @@ the count. Omitting `key` uses a single global bucket across all events.
   suppress_count: true         # default; next passing event gets suppress_count=N
   keep_min_severity: 3
   keep_if: 'fields.event_id == "4625" && severity <= 3'
+```
+
+#### `adaptive_sample` ✅ — hold volume near a target by adjusting the sample rate
+
+Measures how many events a window carried and picks a sampling rate for the next one, so output
+tracks a target as input rises and falls. Never mutates the message.
+
+**Why not `sample` or `throttle`?** They solve different problems:
+
+| | behaviour | weakness |
+|---|---|---|
+| `sample` | fixed 1-in-N | output still swings with input — a burst still floods the receiver |
+| `throttle` | hard cap per window | admits whatever arrived **first**, then goes silent — the tail of an incident is invisible |
+| `adaptive_sample` | `target` free, then a sampled tail | a **bound**, not a precise cap (see below) |
+
+**It is a bound, not a hard ceiling.** Each window admits `target` events unsampled and then a sampled
+tail, so a 10x burst lands near **2x** target rather than 10x. That is deliberate: it keeps both the head
+*and* the tail of a burst visible, and it stops a stale rate from starving a quiet window that follows a
+noisy one. If you need a hard ceiling, use `throttle`.
+
+**Every admitted event carries the effective rate** (`sample_rate` by default) so counts survive sampling:
+20 events stamped rate 50 means roughly 1000 occurred. Without it, sampling silently corrupts every
+downstream count — which is why the annotation is on by default. Set `annotate: ""` to disable it.
+
+The first window after startup admits everything: with no measurement there is no basis for discarding.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `target` | int | *(required)* | Events to admit per window before sampling begins. Must be > 0 |
+| `window` | duration | `60s` | Measurement/adjustment window |
+| `key` | []string | `[]` | Sample each key independently, so a noisy host can't sample a quiet one away |
+| `max_keys` | int | `50000` | Key-cache bound; the oldest key is evicted and restarts at admit-all (fails open) |
+| `annotate` | string | `sample_rate` | Field stamped with the effective 1-in-N. `""` disables |
+| `keep_min_severity` | int | *(unset)* | Never sample events at or below this severity |
+| `keep_if` | string | `""` | Expression; matching events bypass sampling entirely |
+
+```yaml
+- type: adaptive_sample
+  target: 1000            # ~1000 events/window before sampling kicks in
+  window: 60s
+  key: [host]             # per-host budgets
+  keep_min_severity: 3    # never sample warnings and worse
 ```
 
 #### `dedup` ✅ — per-key window deduplication
@@ -966,11 +1173,124 @@ rainbow-table lookup of the original value.
   skip_fields: [host]              # never scrub the routing metadata
 ```
 
+#### `lookup` ✅ — enrich events from a local table (asset inventory, CMDB export)
+
+Reads one field's value, finds the matching row in a table, and copies that row's columns onto the event.
+Never drops events.
+
+A hostname means something on the endpoint and nothing in a SIEM. Turning `host=web01` into
+`owner=payments-team`, `env=prod`, `site=fra1` **at the source** lets downstream routing, alerting and
+detection rules key on business facts instead of on a name someone has to look up by hand — and it costs the
+aggregator nothing: no join, no enrichment pipeline, no per-event round trip.
+
+The table is a CSV or JSON file you already have, or an inline `table:` for a handful of rows. Set exactly one
+of `file:` or `table:`.
+
+- **CSV** — first row is the header, **first column is the key**, remaining columns become fields named by the
+  header.
+- **JSON** — `{"web01": {"owner": "payments", "vlan": 42}, …}`. Numbers and booleans are rendered as text, so
+  an inventory export works unmodified.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `key_field` | string | *(required)* | Field whose value is looked up. `host` / `hostname` / `source` fall back to the event's own host/source when no field of that name exists |
+| `file` | string | `""` | Path to the table (CSV or JSON). Mutually exclusive with `table` |
+| `format` | string | *(from extension)* | `csv` or `json`. Only needed when the filename doesn't say |
+| `table` | map | `{}` | Inline table: `key → {field: value}`. Mutually exclusive with `file` |
+| `fields` | []string | `[]` | Copy only these columns. Empty = every column in the row |
+| `prefix` | string | `""` | Prepended to every added field name, e.g. `asset_` |
+| `on_missing` | string | `skip` | `skip` (leave the event untouched) or `default` (apply `default:`) |
+| `default` | map | `{}` | Values applied when the key is unknown. Required by `on_missing: default` |
+| `overwrite` | bool | `false` | `false` keeps a field the event already carries; `true` replaces it |
+| `reload` | duration | `0` | Re-read the file when it changes, checked at most this often. `0` = never |
+| `case_insensitive` | bool | `false` | Match keys ignoring case (Windows hostnames arrive in mixed case) |
+
+**A missing key is not an error.** An inventory always trails reality — a host built ten minutes ago isn't in
+it yet — so by default the event passes through unchanged. Use `on_missing: default` when a downstream
+consumer needs the field on every event.
+
+**Reload is lazy and safe.** The file's timestamp is checked at most once per `reload` interval, and re-read
+only when it actually changed; a table that is briefly unreadable (mid-rewrite, permissions churn) keeps the
+copy already in memory, so enrichment degrades to *stale*, never to *absent*. A file that cannot be read at
+**startup** is a configuration error instead — a lookup that enriches nothing should fail loudly, not quietly.
+
+```yaml
+- type: lookup
+  key_field: host                  # `host` reads the event's own hostname
+  file: /etc/logrok-agent/assets.csv
+  format: csv                      # host,owner,env,site
+  fields: [owner, env]             # ignore the other inventory columns
+  prefix: asset_                   # -> asset_owner, asset_env
+  reload: 5m                       # pick up inventory changes without a restart
+  case_insensitive: true
+  on_missing: default
+  default: { owner: unassigned, env: unknown }
+```
+
 ---
 
 ## `outputs`
 
-v1 supports **one** output; routing/fan-out is later.
+One or **more** outputs. With a single output the agent behaves exactly as before. Listing several
+outputs enables **multi-destination fan-out**: every event is delivered to *every* output, each with
+its own independent disk spool, drain loop, and metrics — a dead or slow destination never blocks the
+others, and each destination's backlog survives restarts on its own spool. Fan-out is a paid (Apex)
+capability; single-destination forwarding stays free (Core).
+
+### Fan-out (multiple outputs)
+
+```yaml
+outputs:
+  - name: siem          # required to be unique per output (defaults to the type)
+    # when: 'severity <= 3'   # optional routing: only matching events reach this destination
+    type: syslog
+    endpoint: "siem.example:6514"
+  - name: lake
+    type: hec
+    endpoint: "https://splunk.example:8088"
+    token: "REDACTED-HEC-TOKEN"
+    buffer: {max_bytes: 1073741824, when_full: drop_oldest}   # per-output override
+buffer:
+  enabled: true
+  dir: /var/lib/agent/spool     # per-destination subdirs: spool/siem, spool/lake
+```
+
+- **`name`** keys the destination's spool subdirectory and its metrics label. It defaults to the
+  output's `type`; with more than one output every resolved name must be unique (two unnamed outputs
+  of the same type are rejected with a naming hint). Names are restricted to letters, digits, `_`,
+  `-`, `.` (no leading `-`/`.`) — they become directory names. Names must also stay unique after
+  the metrics-key fold (lowercased; `-` and `.` become `_`): `a-b` and `a.b` would report into the
+  same per-destination metrics series, so such pairs are rejected with the colliding key named.
+- **Per-output `when:` routing** — an optional condition (the same expression grammar as the
+  `expr`/`filter` processors: `severity <= 3`, `fields.app == "nginx"`, `message contains "auth"`,
+  combined with `and`/`or`/`not`) restricts which events reach that destination. Absent = the
+  destination receives every event. An event matching **no** destination is intentionally
+  discarded (counted under the `routing_when` drop family) — **a `when:`-filtered event is gone; it
+  is not spooled anywhere**, so keep a catch-all destination if you need one. A bad expression is
+  rejected when the configuration is applied (a pushed config rolls back). Routing requires the
+  same Apex entitlement as fan-out; a degraded agent clears `when:` conditions with a loud warning
+  so it never silently drops events you believe are being collected.
+- **Per-output `buffer:` override** — `max_bytes` and `when_full` may be set per output (a lossy
+  best-effort sink and a must-not-drop SIEM feed legitimately want different policies). Anything not
+  overridden inherits the global `buffer` settings. An explicit `max_bytes: 0` means unlimited.
+- **Delivery semantics.** An input's checkpoint advances only when **every** destination holds the
+  event durably (delivered or on its spool) — so no destination can silently miss events the agent
+  has acknowledged to its source. Under `when_full: block`, a full destination back-pressures the
+  whole pipeline (the slowest destination governs, by design — `block` means "never lose").
+- **Spool layout & scaling.** With one output the spool lives directly in `buffer.dir` (unchanged
+  from earlier releases). With several, each destination gets `buffer.dir/<name>`. The agent
+  migrates automatically in both directions: going from one output to several moves an existing
+  root-layout backlog into the *first* output's subdirectory; going back to one output moves that
+  output's subdirectory back. A backlog is never silently stranded — subdirectories that match no
+  configured output name are reported loudly at startup ("orphaned spool subdirectory"), and a
+  migration that would overwrite existing spool files refuses and fails the config load instead.
+- **Metrics.** Each destination exports its own series —
+  `logrok_agent_output_events_out_total{output="siem"}`, `..._events_dropped_total`,
+  `..._buffer_depth`, `..._spool_generation` — while the fleet-wide unlabeled totals remain the sums
+  across destinations.
+- Per-output routing/filtering (`when:` conditions) is not part of fan-out v1; every destination
+  receives every event. Use per-destination processors downstream or a filter processor ahead of the
+  outputs.
 
 ### `syslog` ✅ — RFC 5424 over TCP (TLS/mTLS) or UDP (diode mode)
 
@@ -1112,7 +1432,11 @@ codes that can only mean "the server made a final decision, retrying changes not
 `on_reject` decides whether the batch is dropped or written to `dead_letter_dir` for offline inspection (the
 100 MiB cap is a reliability bound, not automated replay — dead-letter is diagnostic quarantine). A partial
 success (some records rejected, others accepted) is logged as a warning, per the OTLP spec, and not retried.
-Redirects are never followed.
+Redirects are never followed. One bound applies to any acknowledged transport: an acknowledgment means the
+receiver *accepted* the batch, so the agent's delivery guarantee ends at the receiver's front door — what
+happens downstream of an ack is bounded by the receiver's own ack-to-durability depth. A receiver that
+acknowledges into an in-memory queue can still lose acked batches if it crashes before flushing them onward;
+where that matters, enable durable buffering on the receiver's onward path.
 
 **Plaintext gRPC (h2c)** works out of the box against a stock `otel/opentelemetry-collector` OTLP receiver on
 its default `:4317` — set `protocol: grpc` with `tls: false` for a LAN/dev collector, add `tls: true` (+
@@ -1168,6 +1492,237 @@ errors, an incorrect index, channel/acknowledgment misconfiguration, HEC reporti
 unrecognized response code, and ordinary network/timeout failures — is treated as **retryable**: the batch
 stays in the disk spool and is retried, and events are never dropped for a condition the operator can fix
 (e.g. a bad token) or that is merely transient.
+
+### `loki` ✅ *(verified end-to-end against a real Grafana Loki instance — events query-verified after delivery, and after a sustained receiver outage with zero event loss)* — Grafana Loki
+
+Pushes events to Loki's ingest API (`POST /loki/api/v1/push`).
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `endpoint` | string | *(required)* | `http(s)://host:3100` (the push path is implied) or the explicit `…/loki/api/v1/push` when a reverse proxy adds a prefix |
+| `tenant` | string | `""` | Sent as `X-Scope-OrgID`. Required by a multi-tenant Loki |
+| `labels` | map | `{job: luna}` | Static stream labels. **This is the safe place to put labels** |
+| `label_fields` | []string | `[]` | Event fields promoted to labels. `host` and `source` fall back to the event's own values. **Read the cardinality warning below** |
+| `structured_metadata` | bool | `false` | Send the remaining fields as Loki structured metadata — queryable **without** being indexed |
+| `line_format` | string | `message` | `message` (the log line) or `json` (the whole event as a JSON line) |
+| `gzip` | bool | `false` | Compress the request body |
+| `timeout` | duration | `10s` | Per-request timeout |
+| `batch_max_bytes` | int | `1048576` | Split larger batches into several pushes; stays under the usual distributor receive limit |
+| `bearer_token` | string | `""` | `Authorization: Bearer …`. Mutually exclusive with basic auth |
+| `basic_auth_user` / `basic_auth_password` | string | `""` | HTTP basic auth (Grafana Cloud uses the user for the tenant/instance ID) |
+| `ca_file` | string | `""` | CA bundle for `https://` endpoints |
+| `insecure_skip_verify` | bool | `false` | Skip certificate verification (test only) |
+| `dead_letter_dir` | string | `""` | Where payloads Loki permanently rejected are written instead of being dropped silently |
+
+**Label cardinality is the one way to hurt a Loki cluster from the agent.** Loki builds an index entry per
+distinct label set, so promoting a per-event value — a request ID, a user ID, a session — to a label
+multiplies streams without bound and can take ingesters down. Keep `labels` static, put per-event detail in
+`structured_metadata` (queryable, not indexed), and use `label_fields` only for genuinely low-cardinality
+dimensions like environment or role. The agent warns in its own log the first time one batch produces an
+unusually large number of streams, so the mistake surfaces on day one instead of in an ingester post-mortem.
+
+**Ordering.** Loki accepts out-of-order entries by default (since 2.4), so the agent neither sorts nor holds
+events back. An entry older than the cluster's accepted window is rejected as a validation error like any
+other malformed payload.
+
+**Error handling.** A `400` is documented as a validation failure Loki will never accept: that payload is
+dead-lettered (or dropped, if `dead_letter_dir` is unset) and counted in `events_dropped`, because retrying it
+forever would wedge the spool behind data that can never land. Everything else — `429` (the ingestion rate
+limit), any `5xx`, authentication failures, and ordinary network/timeout errors — is **retryable**: the batch
+stays in the disk spool and is retried, so a rate limit or a fixable credential never costs events.
+
+```yaml
+- type: loki
+  endpoint: "http://loki.example:3100"
+  tenant: acme
+  labels: { job: luna, env: prod }
+  label_fields: [host]          # low cardinality only
+  structured_metadata: true     # everything else rides here
+  gzip: true
+```
+
+### `kafka` ✅ — Apache Kafka / Kafka-compatible brokers (Redpanda, …)
+
+Produces events to a Kafka topic — the sink to reach for when the destination is a Kafka-based
+pipeline or data lake rather than a syslog receiver. Acked like `otlp`/`hec`: the producer's
+per-record delivery report commits the batch, transient broker failures (down broker, leader
+election, throttling) spool-and-retry with at-least-once delivery, and idempotent produce is
+always on (the client's internal retries cannot duplicate records on the broker). Authentication
+and authorization failures also spool-and-retry — fixed credentials or ACLs deliver the backlog
+rather than finding it discarded. Only payload-inherent rejections (a record larger than the
+cluster accepts, a record the broker's validation refuses) are terminally disposed via
+`on_reject`.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `brokers` | list | *(required)* | seed broker list, `host:port` each (not URLs) |
+| `topic` | string | *(required)* | target topic; the agent never auto-creates topics (a broker policy, not an agent right) |
+| `encoding` | string | `json` | `json` (the whole structured event — timestamp, host, source, severity, facility, message, fields — as one JSON object) or `message` (the raw message text only) |
+| `key_field` | string | `host` | event field used as the record key (partition affinity — the default keeps per-host ordering). `host`/`source` read the event's own attributes; any other name reads a structured field. Explicit `key_field: ""` disables keying (round-robin) |
+| `headers` | map | `{}` | static record headers attached to every record |
+| `compression` | string | `snappy` | `snappy` \| `gzip` \| `lz4` \| `zstd` \| `none` |
+| `tls` | bool | `false` | TLS to the brokers; sub-keys below apply when set |
+| `ca_file` / `cert_file` / `key_file` / `server_name` / `insecure_skip_verify` | | | the standard output TLS block (mTLS via cert+key) |
+| `cert_source` | string | `static` | `enrolled` presents the control-plane-issued client certificate (requires `management.tls.mode: enrolled`) |
+| `sasl` | block | *(off)* | SASL authentication: `sasl.mechanism` (`plain` \| `scram-sha-256` \| `scram-sha-512`) + `sasl.username` + `sasl.password`, all required together |
+| `timeout` | duration | `10s` | per-record delivery bound; past it the batch fails and is spooled for retry |
+| `batch_max_bytes` | int | `1048576` (1 MiB) | producer batch bound. A single record larger than the cluster's message cap can never be sent and is terminally rejected rather than retried forever |
+| `on_reject` | string | `drop` | disposal for terminally rejected records: `drop` (counted + logged) or `dead_letter` |
+| `dead_letter_dir` | string | `""` | required with `on_reject: dead_letter`; rejected records are quarantined as replayable NDJSON (`{"topic","key","value"}` per line), bounded at 100 MiB |
+
+```yaml
+outputs:
+  - type: kafka
+    brokers: ["broker-1:9092", "broker-2:9092"]
+    topic: logs
+    sasl: {mechanism: scram-sha-512, username: agent, password: "REDACTED"}
+    tls: true
+    ca_file: /etc/logrok-agent/kafka-ca.pem
+```
+
+### `s3` ✅ — Amazon S3 / S3-compatible object stores (MinIO, Ceph, R2, …)
+
+Writes event batches as objects to an S3 bucket — the sink for data-lake and archive patterns
+(Athena, Snowflake, security-data-lake tooling all ingest the produced layout directly). Each
+batch becomes one time-partitioned NDJSON object (gzipped by default), uploaded with a single
+signed `PutObject`; the store's 200 response commits the batch. Transient failures (network, 5xx,
+throttling) spool-and-retry with at-least-once delivery, and authentication, permission, and
+missing-bucket failures also spool-and-retry — fixed credentials or a created bucket deliver the
+backlog rather than finding it discarded. The agent never creates buckets (a store policy, not an
+agent right). Only a payload-inherent rejection (an object larger than the store accepts) is
+terminally disposed via `on_reject`. Works against any S3-API endpoint: leave `endpoint` empty
+for AWS, or point it at a compatible store.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `bucket` | string | *(required)* | target bucket; must already exist |
+| `region` | string | *(required for AWS)* | SigV4 signing region; defaults to `us-east-1` when `endpoint` is set (compatible stores accept any region string) |
+| `endpoint` | string | *(AWS)* | S3-compatible store URL (e.g. `https://minio.example:9000`); empty targets `https://<bucket>.s3.<region>.amazonaws.com` |
+| `force_path_style` | bool | auto | bucket in the path (`/bucket/key`) instead of the virtual host. Defaults to `true` when `endpoint` is set, `false` for AWS |
+| `key_prefix` | string | `""` | prepended to every object key (e.g. `logs/`) |
+| `partition_style` | string | `hive` | `hive` (`year=2026/month=08/day=18/hour=03/…` — Athena/Glue partition-friendly) or `path` (`2026/08/18/03/…`) |
+| `encoding` | string | `json` | `json` (one JSON object per line — same object shape as the `kafka` output's `json` encoding, so one consumer schema covers both) or `message` (raw message lines) |
+| `compression` | string | `gzip` | `gzip` (objects get `.ndjson.gz` and `Content-Encoding: gzip`) or `none` |
+| `storage_class` | string | *(bucket default)* | optional `x-amz-storage-class` passthrough (e.g. `STANDARD_IA`) |
+| `access_key_id` / `secret_access_key` / `session_token` | string | *(env)* | credentials; any field left empty falls back to `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` |
+| `ca_file` | string | `""` | CA bundle for a private endpoint's TLS |
+| `insecure_skip_verify` | bool | `false` | skip TLS verification (testing only) |
+| `timeout` | duration | `30s` | per-upload bound; past it the batch fails and is spooled for retry |
+| `on_reject` | string | `drop` | disposal for terminally rejected objects: `drop` (counted + logged) or `dead_letter` |
+| `dead_letter_dir` | string | `""` | required with `on_reject: dead_letter`; the rejected object is quarantined verbatim (already-replayable NDJSON), bounded at 100 MiB |
+
+**Security-Lake feed (`format: parquet-ocsf`).** The second format turns the sink into an
+[AWS Security Lake custom source](https://docs.aws.amazon.com/security-lake/latest/userguide/custom-sources.html)
+feed: events render as **OCSF `base_event` (1.3.0)** rows and upload as **zstd-compressed Parquet**
+objects under the mandatory `region=/accountId=/eventDay=` partition layout, time-sorted, one
+eventDay per object. Because Security Lake wants objects accumulated over at least five minutes,
+rows first land in a local fsync'd staging file — the batch is acknowledged once staged durably —
+and an uploader flushes them on `flush_interval` (or earlier at `flush_max_bytes`). Staged rows
+survive restarts and failed uploads (retried on the next interval; duplication possible after a
+crash, never loss). Works against MinIO and other S3-compatible stores for testing.
+
+| Option (parquet-ocsf mode) | Type | Default | Notes |
+|---|---|---|---|
+| `format` | string | `ndjson` | `ndjson` (one batch, one object — above) or `parquet-ocsf` (the Security-Lake feed) |
+| `ocsf_class` | string | `base_event` | the OCSF class rendered; `base_event` is the supported class today |
+| `account_id` | string | *(required)* | the Security-Lake `accountId` partition value (an AWS account id, or an `external`-style string for non-AWS sources) |
+| `staging_dir` | string | *(required)* | local directory for the fsync'd staging file between flushes |
+| `flush_interval` | duration | `5m` | upload cadence (Security Lake's documented delivery floor) |
+| `flush_max_bytes` | int | `268435456` (256 MB) | staged-bytes early-flush trigger (the vendor's row-group ceiling) |
+
+With `format: parquet-ocsf`, `partition_style` is not configurable (the Security-Lake layout is
+mandatory) and `key_prefix` should carry the source prefix Security Lake assigns (e.g. `ext/<source>/`).
+
+```yaml
+outputs:
+  - type: s3
+    bucket: security-lake-raw
+    region: eu-west-1
+    key_prefix: logrok/
+    # endpoint: https://minio.example:9000   # any S3-compatible store
+
+  # AWS Security Lake custom-source feed:
+  # - type: s3
+  #   bucket: aws-security-data-lake-...
+  #   region: eu-west-1
+  #   format: parquet-ocsf
+  #   account_id: "123456789012"
+  #   key_prefix: ext/logrok/
+  #   staging_dir: /var/lib/logrok-agent/s3-staging
+  #   # flush_interval: 5m
+```
+
+### `sentinel` ✅ — Microsoft Sentinel / Azure Monitor Logs (Logs Ingestion API)
+
+Sends events to a Log Analytics workspace — and thereby Microsoft Sentinel — via the modern **Logs
+Ingestion API** with a Data Collection Rule (DCR). Batches are posted as JSON arrays (gzipped by
+default, split automatically under the API's per-call size bound); the service's success response
+commits the batch. Transient failures (network, 5xx, throttling) spool-and-retry with at-least-once
+delivery, and authentication failures — both at the ingestion endpoint and at the token endpoint —
+also spool-and-retry, so credentials fixed later deliver the backlog rather than finding it
+discarded. Only a payload rejection (the rows don't match the DCR's stream declaration) is
+terminally disposed via `on_reject`. Rows carry a fixed schema (`TimeGenerated`, `Computer`,
+`Source`, `SeverityNumber`, `Facility`, `Message`, `AdditionalContext`); the DCR's `transformKql`
+reshapes them onto your table, so no per-table configuration lives in the agent. Authentication is
+a Microsoft Entra app registration (client-credentials flow) with the **Monitoring Metrics
+Publisher** role on the DCR.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `endpoint` | string | *(required)* | the DCR's logs-ingestion endpoint URL (DCRs created as `kind: Direct`), or a Data Collection Endpoint for private-link setups |
+| `dcr_id` | string | *(required)* | the DCR **immutable id** (`dcr-…`, from the DCR's overview page) |
+| `stream` | string | *(required)* | the DCR stream name the rows target (e.g. `Custom-AgentLogs_CL`) |
+| `tenant_id` / `client_id` / `client_secret` | string | *(env)* | Entra app-registration credentials; any field left empty falls back to `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` |
+| `scope` | string | `https://monitor.azure.com/.default` | token audience; override for sovereign clouds (`https://monitor.azure.cn/.default`, `https://monitor.azure.us/.default`) |
+| `compression` | string | `gzip` | `gzip` or `none` |
+| `timeout` | duration | `30s` | per-request bound (token and ingestion calls); past it the batch fails and is spooled for retry |
+| `batch_max_bytes` | int | `1048576` (1 MB) | client-side split threshold matching the API's per-call bound (uncompressed) |
+| `ca_file` | string | `""` | CA bundle for a private endpoint's TLS |
+| `insecure_skip_verify` | bool | `false` | skip TLS verification (testing only) |
+| `on_reject` | string | `drop` | disposal for terminally rejected rows: `drop` (counted + logged) or `dead_letter` |
+| `dead_letter_dir` | string | `""` | required with `on_reject: dead_letter`; the rejected JSON array is quarantined verbatim (replayable against a fixed DCR with any HTTP client), bounded at 100 MiB |
+
+```yaml
+outputs:
+  - type: sentinel
+    endpoint: https://my-dcr-abcd.westeurope-1.ingest.monitor.azure.com
+    dcr_id: dcr-000a00a000a00000a000000aa000a0aa
+    stream: Custom-AgentLogs_CL
+    # credentials fall back to AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
+```
+
+### `xsiam` ✅ — Palo Alto Cortex XSIAM (HTTP log collector)
+
+Sends events to a Cortex XSIAM tenant via its HTTP log collector — batches post as
+newline-delimited records (gzipped by default, split automatically under the vendor-recommended
+1 MB request size), authenticated with the collector instance's API key. The success response
+commits each batch. Transient failures, throttling, wrong-endpoint and authentication failures all
+spool-and-retry — a rotated key or corrected URL delivers the backlog rather than finding it
+discarded. Only a single record the collector's per-record size cap can never accept is terminally
+disposed via `on_reject`. Note the collector reports a **log-format mismatch as a 500**, which the
+agent deliberately treats as retryable: a persistently wedged xsiam spool usually means the
+collector instance's configured format doesn't match `encoding` — fix the instance (or `encoding`)
+and the backlog delivers.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `endpoint` | string | *(required)* | the tenant collector URL (`https://api-<tenant>/logs/v1/event`) |
+| `api_key` | string | *(env)* | the collector instance's key; falls back to `XSIAM_API_KEY` |
+| `encoding` | string | `json` | `json` (one JSON object per line — the same shape as the `kafka`/`s3` json encodings; use with a JSON-format collector instance) or `message` (raw log lines, for a Raw-format instance) |
+| `compression` | string | `gzip` | `gzip` or `none` — **must match the collector instance's setting** (chosen when the instance is created) |
+| `timeout` | duration | `30s` | per-request bound; past it the batch fails and is spooled for retry |
+| `batch_max_bytes` | int | `1048576` (1 MB) | client-side split threshold (the vendor recommendation; hard request cap is 10 MB) |
+| `ca_file` | string | `""` | CA bundle for TLS to the collector |
+| `insecure_skip_verify` | bool | `false` | skip TLS verification (testing only) |
+| `on_reject` | string | `drop` | disposal for terminally rejected records: `drop` (counted + logged) or `dead_letter` |
+| `dead_letter_dir` | string | `""` | required with `on_reject: dead_letter`; rejected records are quarantined as replayable NDJSON, bounded at 100 MiB |
+
+```yaml
+outputs:
+  - type: xsiam
+    endpoint: https://api-mytenant.xdr.paloaltonetworks.com/logs/v1/event
+    # api_key falls back to XSIAM_API_KEY
+```
 
 ### `relay` ✅ — ack'd reliable transport (agent→agent)
 

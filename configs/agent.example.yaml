@@ -16,7 +16,11 @@ service:
 # config-pull with hot-reload (validated, atomic, lock-out-guarded).
 management:
   endpoint: ""             # e.g. https://logrok-control-plane:16550   ("" = unmanaged; use https in prod)
+                           # "auto" = discover it on the local segment via mDNS (opt-in; discovery
+                           # locates but never authenticates — the token/TLS still prove the CP)
   # enrollment_token: "ONE-TIME-TOKEN"   # exchanged on first start; removable afterwards
+  # enrollment_bundle: /media/usb/site-a.bundle   # AIR-GAP: signed identity+entitlement(+config),
+  #                                 # verified offline, adopted once. No control plane needed.
   # state_path: ""         # default: agent-state.json next to this file (0600; holds agent_id + api_key)
   # api_key: ""            # manual provisioning alternative to enrollment
   # tenant_slug: "default"
@@ -123,6 +127,55 @@ inputs:
   #   # tls_client_ca_file: /etc/logrok-agent/ca.pem  # mTLS: require + verify client certs
   #   # source: http_in               # Event.Source label; facility/severity default 16/6
 
+  # - type: snmptrap_in               # receive SNMP traps/informs from network & OT devices (Apex)
+  #   listen: "0.0.0.0:1162"          # UDP; port 162 needs CAP_NET_BIND_SERVICE — 1162 + a redirect works unprivileged
+  #   versions: [v1, v2c, v3]         # accepted versions; default [v1, v2c]
+  #   community: [mycommunity]        # v1/v2c allow-list (empty = accept any; plaintext — prefer v3)
+  #   v3_users:                       # required when versions includes v3
+  #     - username: otuser
+  #       auth_protocol: sha256       # sha256 recommended (sha/sha224/sha384/sha512; md5 legacy)
+  #       auth_password: authpass
+  #       priv_protocol: aes256       # aes/aes192/aes256 recommended (des legacy; empty = authNoPriv)
+  #       priv_password: privpass
+  #   # oid_names: {"1.3.6.1.6.3.1.1.5.3": linkDown}   # label your top OIDs; no MIB compiler
+  #   # queue_size: 1024              # storm buffer; overflow is counted+dropped (UDP can't be back-pressured)
+  #   # source: snmptrap_in           # Event.Source label; facility/severity default 23/5 (local7/notice)
+
+  # - type: modbus_in                 # poll Modbus TCP devices — emits OT EVENTS, never raw register streams (Apex)
+  #   targets:                        # required; each device polled on its own connection + schedule
+  #     - address: "plc-01.plant.example:502"   # required; host:port (Modbus TCP is usually 502)
+  #       unit_id: 1                  # slave/unit id 0-255; default 1
+  #       poll_every: 5s              # default 5s; hard floor 100ms (this extracts events, it does not stream)
+  #       timeout: 3s                 # per-request timeout; must not exceed poll_every
+  #       # address_base: protocol    # protocol (default, zero-based wire address) | data_model (vendor 4xxxx/3xxxx/1xxxx/0xxxx)
+  #       # max_read_gap: 8           # unwatched registers that may be read to merge two watches into one request
+  #       watches:                    # required; the registers to observe
+  #         - name: pump_pressure     # required; unique per device, keys every event
+  #           register: "holding:11"  # required; <coil|discrete|input|holding>:<address>
+  #           type: int16             # bool | int16 | uint16 | int32 | uint32 | float32 (32-bit reads two registers)
+  #           scale: 0.1              # raw x scale = engineering value used in events + thresholds
+  #           on_change: true         # emit state_change when the value changes
+  #           deadband: 0.5           # ignore changes smaller than this (analog jitter guard); needs on_change
+  #           threshold: { above: 8.0, below: 0.5 }   # emit on crossing a bound, and again on returning inside
+  #           # word_order: big       # 32-bit types only: big (default) | little (word swap)
+  #         - { name: valve_state, register: "coil:12", on_change: true }
+  #   # snapshot_every: 1h            # optional slow audit baseline of every watch; minimum 1m, 0 = off
+  #   # emit_initial_snapshot: false  # also snapshot on the first successful poll
+  #   # failures_before_unavailable: 2  # consecutive failed polls before an availability event
+  #   # queue_size: 256               # hand-off queue; overflow is counted+dropped, never stalls the pollers
+  #   # source: modbus_in             # Event.Source label; facility/severity default 16/5 (local0/notice)
+  #   # --- serial (RTU) instead of TCP: set transport + device rather than address ---
+  #   # - transport: rtu
+  #   #   device: /dev/ttyUSB0        # COM3 on Windows; agent needs permission (Linux: dialout group)
+  #   #   baud: 19200                 # 1200..115200; Modbus default 19200
+  #   #   parity: even                # even (default) | odd | none
+  #   #   stop_bits: 1                # 1, or 2 when parity is none (keeps the frame 11 bits)
+  #   #   data_bits: 8                # must be 8 (7 = Modbus ASCII, not supported)
+  #   #   unit_id: 1
+  #   #   watches: [...]              # identical to TCP
+  #   # NOTE read-only by construction: only Modbus read function codes exist in the agent — it cannot
+  #   #      write to a controller, on either transport.
+
   # - type: mqtt_in                   # subscribe to an MQTT broker (IoT/edge ingest; the agent dials OUT)
   #   name: iot
   #   broker: "broker.local:1883"     # host:port of the MQTT broker (required)
@@ -221,6 +274,11 @@ processors:
   #   keep_min_severity: 3            # events with Severity <= 3 (err+) always pass
   #   keep_if: 'fields.event_id == "4625"'  # expr condition (&&/||); matching events always pass
 
+  # - type: quota                     # hard daily volume cap (Apex; UTC day, in-memory budget)
+  #   max_bytes: 1073741824           # ~1 GiB/day; and/or max_events
+  #   # suppress_count: true          # annotate the first admitted event after drops
+  #   # keep_min_severity: 3          # err and worse always pass (never swallow pages)
+
   # - type: throttle                  # allow max events per window per key; drop excess
   #   max: 10                         # maximum events to pass in each window
   #   window: 1m                      # window duration (e.g. 30s, 5m, 1h)
@@ -245,6 +303,17 @@ processors:
   #   max_message_bytes: 4096         # truncate message to N bytes (rune-safe, appends …); 0 = no limit
   #   max_field_bytes: 512            # truncate each field value to N bytes; 0 = no limit
 
+  # - type: adaptive_sample           # hold volume near a target; adjusts its own sample rate per window
+  #   target: 1000                    # events admitted per window before sampling begins (required, > 0)
+  #   window: 60s                     # measurement/adjustment window
+  #   key: [host]                     # sample each key independently (a noisy host can't starve a quiet one)
+  #   max_keys: 50000                 # key-cache bound; evicted keys restart at admit-all (fails open)
+  #   annotate: sample_rate           # field stamped with the effective 1-in-N; "" disables
+  #   keep_min_severity: 3            # never sample warnings and worse
+  #   # NOTE: a BOUND, not a hard cap — `target` events pass free, then a sampled tail, so a
+  #   # 10x burst lands near 2x target. Keeps the head AND tail of a burst visible.
+  #   # For a hard ceiling use `throttle` instead.
+
   # - type: redact                    # remove sensitive values ON THE ENDPOINT, before they cross the wire
   #   patterns: [email, credit_card]  # built-ins: email, ipv4, credit_card (Luhn-checked, not "any 16 digits")
   #   regex: ['token=[A-Za-z0-9]+']   # additional site-specific patterns (RE2)
@@ -257,11 +326,99 @@ processors:
   #   # NOTE: at least one of patterns/regex is required — a redact step matching nothing
   #   # would pass sensitive data through while looking configured, so the agent refuses it.
 
+  # - type: lookup                    # enrich from a local table: host -> owner/env/site, at the SOURCE
+  #   key_field: host                 # field to look up; host/hostname/source fall back to the event's own
+  #   file: /etc/logrok-agent/assets.csv   # CSV (first column = key, header names the fields) or JSON
+  #   format: csv                     # csv | json — only needed when the extension doesn't say
+  #   # table:                        # inline alternative to `file:` (set one, not both)
+  #   #   web01: { owner: payments-team, env: prod }
+  #   fields: [owner, env]            # copy only these columns; empty = every column in the row
+  #   prefix: asset_                  # -> asset_owner, asset_env
+  #   overwrite: false                # false keeps a field the event already carries
+  #   case_insensitive: true          # Windows hostnames arrive in mixed case
+  #   reload: 5m                      # re-read when the file changes, checked at most this often (0 = never)
+  #   on_missing: skip                # skip (default) | default — an inventory always trails reality
+  #   # default: { owner: unassigned } # required by on_missing: default
+
 outputs:
   # Forward as RFC 5424 over TCP/TLS to any aggregator (a logrok deployment,
   # a SIEM, any syslog collector). Standard ports: 514 plain, 6514 TLS.
+  #
+  # Multi-destination fan-out (Apex): list MORE than one output and every event
+  # is delivered to every destination, each with its own disk-spool subdirectory
+  # (buffer.dir/<name>), drain loop, and metrics label. `name` must be unique
+  # per output (defaults to the type); a per-output `buffer:` block overrides
+  # max_bytes / when_full for that destination's spool only:
+  #
+  # - type: hec
+  #   name: lake
+  #   endpoint: "https://splunk.example:8088"
+  #   token: "REDACTED-HEC-TOKEN"
+  #   buffer: {when_full: drop_oldest}     # this sink may shed; the SIEM below must not
+  #
+  # Kafka (or Redpanda / any Kafka-API broker). Acked per record; idempotent
+  # produce always on; auth/ACL failures spool-and-retry (never discarded).
+  # - type: kafka
+  #   brokers: ["broker-1:9092", "broker-2:9092"]
+  #   topic: logs
+  #   # encoding: json          # default; 'message' = raw log line only
+  #   # key_field: host         # default (per-host ordering); "" = round-robin
+  #   # compression: snappy     # default; gzip|lz4|zstd|none
+  #   # headers: {env: prod}
+  #   # sasl: {mechanism: scram-sha-512, username: agent, password: "REDACTED"}
+  #   # tls: true
+  #   # ca_file: /etc/logrok-agent/kafka-ca.pem
+  #   # on_reject: dead_letter
+  #   # dead_letter_dir: /var/lib/logrok-agent/dead-letter
+
+  # S3 / S3-compatible object store (data-lake & archive feeds):
+  # - type: s3
+  #   bucket: security-lake-raw
+  #   region: eu-west-1            # SigV4 signing region (required for AWS)
+  #   # endpoint: https://minio.example:9000   # any S3-compatible store (MinIO, Ceph, R2)
+  #   # force_path_style: true     # auto: true when endpoint set, false for AWS
+  #   # key_prefix: logrok/
+  #   # partition_style: hive      # default (year=…/month=…); 'path' = plain 2026/08/18
+  #   # encoding: json             # default (NDJSON, one event per line); 'message' = raw lines
+  #   # compression: gzip          # default; 'none'
+  #   # storage_class: STANDARD_IA
+  #   # access_key_id: ...         # fall back to AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+  #   # secret_access_key: ...
+  #   # timeout: 30s
+  #   # on_reject: dead_letter
+  #   # dead_letter_dir: /var/lib/logrok-agent/dead-letter
+  #   # --- AWS Security Lake custom-source feed (OCSF base_event as zstd Parquet): ---
+  #   # format: parquet-ocsf
+  #   # account_id: "123456789012"
+  #   # key_prefix: ext/logrok/         # the prefix Security Lake assigns the source
+  #   # staging_dir: /var/lib/logrok-agent/s3-staging
+  #   # flush_interval: 5m              # Security Lake's delivery floor
+
+  # Microsoft Sentinel / Azure Monitor Logs (Logs Ingestion API, DCR-based):
+  # - type: sentinel
+  #   endpoint: https://my-dcr-abcd.westeurope-1.ingest.monitor.azure.com
+  #   dcr_id: dcr-000a00a000a00000a000000aa000a0aa
+  #   stream: Custom-AgentLogs_CL
+  #   # tenant_id / client_id / client_secret: fall back to AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
+  #   # scope: https://monitor.azure.com/.default   # override for sovereign clouds
+  #   # compression: gzip          # default; 'none'
+  #   # batch_max_bytes: 1048576   # API per-call bound (client-side split)
+  #   # timeout: 30s
+  #   # on_reject: dead_letter
+  #   # dead_letter_dir: /var/lib/logrok-agent/dead-letter
+
+  # Palo Alto Cortex XSIAM (HTTP log collector):
+  # - type: xsiam
+  #   endpoint: https://api-mytenant.xdr.paloaltonetworks.com/logs/v1/event
+  #   # api_key: ...              # falls back to XSIAM_API_KEY
+  #   # encoding: json            # default (NDJSON; JSON-format collector); 'message' = raw lines
+  #   # compression: gzip         # default; MUST match the collector instance's setting
+  #   # batch_max_bytes: 1048576  # vendor-recommended request size (hard cap 10 MB)
+  #   # on_reject: dead_letter
+  #   # dead_letter_dir: /var/lib/logrok-agent/dead-letter
   - type: syslog
     name: aggregator
+    # when: 'severity <= 3'  # optional routing (fan-out): only matching events reach this destination
     endpoint: "aggregator:6514"
     protocol: tcp            # default. 'udp' = one datagram per message (RFC 5426) for data diodes / udp() receivers; no TLS, no framing
     framing: newline         # TCP only, default. one msg per LF (logrok syslog-ng + most receivers). 'octet-counting' = RFC 6587, opt-in
@@ -354,3 +511,23 @@ outputs:
   #   ca_file: /etc/logrok-universal-agent/ca.pem   # default: "" (system roots)
   #   insecure_skip_verify: false    # default. DEV ONLY
   #   dead_letter_dir: /var/lib/logrok-agent/hec-dead-letter   # default: "" (drop, no quarantine); malformed-payload rejects land here as newline-delimited JSON (100 MiB cap)
+
+  # - type: loki                     # Grafana Loki push API (self-hosted or Grafana Cloud)
+  #   endpoint: "http://loki.example:3100"    # base URL; /loki/api/v1/push is implied
+  #   tenant: acme                   # X-Scope-OrgID; required by a multi-tenant Loki
+  #   labels: { job: luna, env: prod }        # STATIC stream labels — the safe place for labels
+  #   label_fields: [host]           # event fields promoted to labels; LOW CARDINALITY ONLY
+  #   structured_metadata: true      # every other field: queryable WITHOUT being indexed
+  #   line_format: message           # message (default) | json (whole event as the line)
+  #   gzip: true                     # default false
+  #   timeout: 10s                   # default
+  #   batch_max_bytes: 1048576       # default 1 MiB; larger batches are split into several pushes
+  #   basic_auth_user: "123456"      # Grafana Cloud: the instance ID
+  #   basic_auth_password: "<token>" # or bearer_token: (mutually exclusive with basic auth)
+  #   ca_file: /etc/logrok-universal-agent/ca.pem   # default: "" (system roots)
+  #   insecure_skip_verify: false    # default. DEV ONLY
+  #   dead_letter_dir: /var/lib/logrok-agent/loki-rejected   # default: "" (drop, with a count)
+  #   # NOTE: Loki indexes per distinct LABEL SET. A per-event value (request id, user id)
+  #   # promoted to a label multiplies streams without bound and can take ingesters down —
+  #   # put per-event detail in structured_metadata instead. A 400 is dead-lettered (Loki will
+  #   # never accept that payload); 429/5xx/auth/network keep the batch spooled and retried.

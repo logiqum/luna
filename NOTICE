@@ -46,3 +46,57 @@ output (`internal/output/otlp/`):
   A copy of the Apache License, Version 2.0 is included with this distribution
   as LICENSE-APACHE-2.0.txt, and is also available at:
       https://www.apache.org/licenses/LICENSE-2.0
+
+This product includes the following third-party Go modules used by the `kafka`
+output (`internal/output/kafka/`):
+
+  github.com/twmb/franz-go (and github.com/twmb/franz-go/pkg/kmsg) — the pure-Go
+  Apache Kafka client, licensed under a 3-clause BSD license:
+      Copyright 2020, Travis Bischel.
+      https://github.com/twmb/franz-go
+
+  github.com/klauspost/compress, licensed under a 3-clause BSD license (with
+  portions under Apache-2.0 and MIT as noted in its LICENSE file):
+      Copyright (c) 2012 The Go Authors. All rights reserved.
+      Copyright (c) 2019 Klaus Post. All rights reserved.
+      https://github.com/klauspost/compress
+
+  github.com/pierrec/lz4/v4, licensed under a 3-clause BSD license:
+      Copyright (c) 2015, Pierre Curto
+      https://github.com/pierrec/lz4
+
+---
+
+github.com/parquet-go/parquet-go (Apache License 2.0)
+github.com/parquet-go/bitpack (Apache License 2.0)
+  Licensed under the Apache License, Version 2.0; see the modules' LICENSE
+  files for the full text.
+
+github.com/parquet-go/jsonlite (MIT License)
+  Copyright (c) 2025 parquet-go
+
+github.com/andybalholm/brotli (MIT License)
+  Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+github.com/google/uuid (BSD 3-Clause License)
+  Copyright (c) 2009,2014 Google Inc. All rights reserved.
+
+github.com/twpayne/go-geom (BSD 2-Clause License)
+  Copyright (c) 2013, Tom Payne
+
+github.com/gosnmp/gosnmp (BSD-style license, per its LICENSE file)
+  Copyright 2012-2020 The GoSNMP Authors. All rights reserved.
+
+--------------------------------------------------------------------------------
+COMPLETE THIRD-PARTY ATTRIBUTION
+--------------------------------------------------------------------------------
+
+This file records the code this product derives from. The COMPLETE list of
+third-party components distributed with the agent -- every module linked into
+the binaries, the Go standard library, and the packages in the container base
+image -- is in THIRD-PARTY-NOTICES.md, together with the full text of each
+licence and, for the copyleft-licensed components in the container image, how
+to obtain their corresponding source.
+
+THIRD-PARTY-NOTICES.md is generated from the actual dependency graph rather than
+maintained by hand, so it cannot drift from what is shipped.
