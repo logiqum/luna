@@ -1,0 +1,27 @@
+# logrok-universal-agent — forward to Splunk via HTTP Event Collector (HEC).
+# Copy, then set endpoint + token. Full option reference: docs/CONFIGURATION.md.
+
+service:
+  mode: standalone
+  log_level: info
+
+# Disk store-and-forward: survives restarts and Splunk outages (at-least-once).
+buffer:
+  enabled: true
+  dir: /var/lib/logrok-agent/spool
+
+inputs:
+  - type: filetail
+    path: /var/log/*.log
+
+outputs:
+  - type: hec
+    endpoint: "https://splunk.example:8088"
+    token: "YOUR-HEC-TOKEN"
+    # index: main                # omit → the token's default index
+    # sourcetype: logrok         # omit → Splunk's default
+    # event_format: message      # or json (whole structured event as the body)
+    # gzip: true                 # compress POSTs (WAN-friendly)
+    # use_ack: true              # commit only when INDEXED (token needs ack enabled)
+    # ca_file: /etc/ssl/splunk-ca.pem
+    # dead_letter_dir: /var/lib/logrok-agent/hec-dead-letter
