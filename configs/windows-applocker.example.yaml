@@ -1,0 +1,117 @@
+# AppLocker preset — application-control decisions from a Windows endpoint → any
+# syslog aggregator (logrok by default).
+#
+# WHY THIS IS ITS OWN PRESET. AppLocker answers a question the Security channel
+# cannot: "what did this machine actually try to run, and did policy stop it?"
+# The audit-mode IDs (8003 / 8006 / 8021 / 8024) are the ones that matter most
+# before enforcement — each is a file that WOULD have been blocked, which is
+# exactly the list you need to see shrink before you turn enforcement on.
+#
+# VOLUME WARNING, from Microsoft's own guidance: the "EXE and DLL" log is very
+# verbose and can produce a very large number of events depending on the policy
+# deployed. This preset therefore subscribes to DECISION events only — never a
+# blank channel subscription — and the reduction block at the bottom is there for
+# when even that is too much.
+#
+# Event IDs verified against Microsoft Learn, "Using Event Viewer with AppLocker"
+# (retrieved 2026-08-07):
+#   8000 policy conversion FAILED (policy did not apply — a control gap)
+#   8001 policy applied successfully
+#   8002 EXE/DLL allowed          8003 EXE/DLL would have been blocked (audit mode)
+#   8004 EXE/DLL BLOCKED
+#   8005 MSI/script allowed       8006 MSI/script would have been blocked (audit mode)
+#   8007 MSI/script BLOCKED
+#   8008 AppLocker not available on this Windows edition
+#   8020 packaged app allowed     8021 packaged app would have been blocked (audit)
+#   8022 packaged app BLOCKED
+#   8023 packaged app install allowed
+#   8024 packaged app install would have been blocked (audit)
+#   8025 packaged app install BLOCKED
+#
+# Prerequisites:
+#   - The Application Identity (AppIDSvc) service must be running, or AppLocker
+#     produces no events at all.
+#   - An AppLocker policy must be deployed (audit or enforce). With no policy
+#     there is nothing to log.
+#   - The agent service reads these channels without administrator privileges,
+#     unlike the Security channel — but if you combine this with
+#     configs/windows-security.example.yaml, that preset's admin requirement applies.
+
+service:
+  mode: service
+  log_level: info
+  metrics_listen: "127.0.0.1:9090"
+
+buffer:
+  enabled: true
+  dir: 'C:\ProgramData\logrok-universal-agent\spool'
+  max_bytes: 1073741824        # 1 GiB
+
+inputs:
+  # Executables and DLLs. The noisiest of the four channels by a wide margin.
+  #
+  # 8004 (blocked) and 8003 (would have been blocked) are the security signal.
+  # 8002 (allowed) is included because an allow-list is what makes a blocked event
+  # interpretable — drop it first if volume is a problem.
+  - type: windows_eventlog
+    name: applocker-exe-dll
+    channels: ['Microsoft-Windows-AppLocker/EXE and DLL']
+    query: "*[System[(EventID=8002 or EventID=8003 or EventID=8004)]]"
+
+  # Installers and scripts — where "living off the land" shows up (.msi, .ps1,
+  # .bat, .cmd, .vbs, .js).
+  - type: windows_eventlog
+    name: applocker-msi-script
+    channels: ['Microsoft-Windows-AppLocker/MSI and Script']
+    query: "*[System[(EventID=8005 or EventID=8006 or EventID=8007)]]"
+
+  # Packaged (Store/MSIX) app execution.
+  - type: windows_eventlog
+    name: applocker-packaged-exec
+    channels: ['Microsoft-Windows-AppLocker/Packaged app-Execution']
+    query: "*[System[(EventID=8020 or EventID=8021 or EventID=8022)]]"
+
+  # Packaged app installation/update.
+  - type: windows_eventlog
+    name: applocker-packaged-deploy
+    channels: ['Microsoft-Windows-AppLocker/Packaged app-Deployment']
+    query: "*[System[(EventID=8023 or EventID=8024 or EventID=8025)]]"
+
+  # Policy health. 8000 means the policy FAILED to apply — the endpoint is
+  # unprotected while still appearing configured, which is worth alerting on in
+  # its own right. 8008 means this Windows edition cannot run AppLocker at all.
+  - type: windows_eventlog
+    name: applocker-policy-health
+    channels: ['Microsoft-Windows-AppLocker/EXE and DLL']
+    query: "*[System[(EventID=8000 or EventID=8001 or EventID=8008)]]"
+
+processors:
+  - type: add_fields
+    fields:
+      telemetry: windows-applocker
+
+  # Optional: label the enforcement decision so the aggregator can route or alert
+  # without knowing AppLocker's ID scheme. `expr` sets fields conditionally.
+  # - type: expr
+  #   rules:
+  #     - if: 'fields.event_id == "8004" || fields.event_id == "8007" || fields.event_id == "8022" || fields.event_id == "8025"'
+  #       set: { applocker_decision: blocked }
+  #     - if: 'fields.event_id == "8003" || fields.event_id == "8006" || fields.event_id == "8021" || fields.event_id == "8024"'
+  #       set: { applocker_decision: would_block }
+
+  # Optional edge reduction — see docs/USER-GUIDE.md "Reduce volume at the edge".
+  # On a busy fleet the ALLOWED events (8002/8005/8020/8023) are the bulk of the
+  # volume and the least urgent. `dedup` collapses the same binary being launched
+  # repeatedly; keep_min_severity exempts the error-level BLOCKED events, which
+  # AppLocker logs at Error level, so enforcement decisions are never suppressed.
+  # - type: dedup
+  #   window: 5m
+  #   key: [host, event_id, message]
+  #   keep_min_severity: 3
+  #   suppress_count: true
+
+outputs:
+  - type: syslog
+    endpoint: "aggregator:6514"
+    tls: true
+    ca_file: 'C:\ProgramData\logrok-universal-agent\ca.pem'

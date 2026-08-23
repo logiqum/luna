@@ -2,9 +2,11 @@
 
 The cross-platform, vendor-neutral endpoint **log-forwarding agent**: a single static, dependency-free binary
 that collects endpoint logs (Windows Event Log, ETW, WMI, files, journald, syslog, MQTT, HTTP, Linux audit,
-macOS unified logs, …) and forwards them as standard **syslog (RFC 5424) over TCP/TLS** to any aggregator — a
-[logrok](https://logrok.com) deployment by default, or any third-party syslog collector / SIEM. Disk
-store-and-forward keeps data safe across air-gapped or intermittent links.
+macOS unified logs, SNMP traps, Modbus equipment, …) and forwards them as standard **syslog (RFC 5424) over
+TCP/TLS** to any aggregator — a [logrok](https://logrok.com) deployment by default, or any third-party syslog
+collector / SIEM. It also delivers natively to **Splunk HEC, Microsoft Sentinel, Cortex XSIAM, Kafka, S3,
+Grafana Loki and OTLP** when you would rather skip the syslog hop. Disk store-and-forward keeps data safe
+across air-gapped or intermittent links.
 
 **This repository hosts the public downloads and the operator docs.** The friendly landing page is
 **[logrok.com/download](https://logrok.com/download)**.
@@ -64,6 +66,8 @@ cosign verify --key https://raw.githubusercontent.com/logiqum/luna/main/cosign.p
 
 - **[User guide](docs/USER-GUIDE.md)** — install, run, deploy, operate, troubleshoot, and platform notes.
 - **[Configuration reference](docs/CONFIGURATION.md)** — every input, processor, and output with all options.
+- **[Licensing](docs/LICENSING.md)** — the Core/Apex split, the license file, and how offline validation works.
+- **[Compliance mappings](docs/compliance/README.md)** — PCI DSS, NERC CIP, NIS2, DORA and CMMC, honestly scoped.
 
 These docs are kept in sync with each release automatically.
 
@@ -82,5 +86,13 @@ this note is here instead.
 
 LUnA is licensed under the **[End-User License Agreement](LICENSE)**. The free **Core** capability set runs
 with no license for non-commercial use, for use alongside a licensed logrok deployment, and for commercial
-use on up to **10 agents**. The paid **Apex** capability set (Windows Event Log, disk store-and-forward,
-central fleet management, and more) requires a license. Validation is fully offline — no phone-home.
+use on up to **10 agents**.
+
+The line is simple: **Core collects from the host and forwards one open standard — RFC 5424 syslog over
+TCP/TLS — to one destination.** Anything that reads a privileged or proprietary operating-system subsystem
+(Windows Event Log, ETW, WMI, Linux audit, macOS unified logs), or speaks a named vendor or platform API
+(Splunk HEC, Microsoft Sentinel, Cortex XSIAM, Kafka, S3, Grafana Loki, OTLP), is **Apex** — as are disk
+store-and-forward, central fleet management, per-agent mTLS, edge reduction, redaction, Kubernetes container
+logs, the UDP data-diode output and multi-destination fan-out. **TLS is never gated.** Apex is included at no
+charge with a licensed logrok deployment, or purchased standalone. Validation is fully offline — no
+phone-home. See **[docs/LICENSING.md](docs/LICENSING.md)** for the full split.

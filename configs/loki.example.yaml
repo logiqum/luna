@@ -1,0 +1,51 @@
+# logrok-universal-agent — forward to Grafana Loki (self-hosted or Grafana Cloud).
+# Copy, then set endpoint (+ credentials for Cloud). Full option reference: docs/CONFIGURATION.md.
+#
+# READ THIS BEFORE CHANGING `labels`. Loki builds an index entry per distinct
+# LABEL SET, so a per-event value (request id, user id, session, trace id)
+# promoted to a label multiplies streams without bound and can take ingesters
+# down — the damage lands on your shared logging cluster, not on this agent.
+# Static labels below are cheap; per-event detail belongs in structured_metadata,
+# which Loki can query WITHOUT indexing it.
+
+service:
+  mode: standalone
+  log_level: info
+
+# Disk store-and-forward: survives restarts, ingester restarts and rate-limit
+# windows (at-least-once). A 429 or 5xx keeps the batch here and retries it.
+buffer:
+  enabled: true
+  dir: /var/lib/logrok-agent/spool
+
+inputs:
+  - type: filetail
+    path: /var/log/*.log
+
+outputs:
+  - type: loki
+    endpoint: "http://loki.example:3100"    # base URL; /loki/api/v1/push is implied
+    labels:                                  # static stream labels — safe
+      job: luna
+      env: prod
+    structured_metadata: true                # every other field: queryable, not indexed
+    # label_fields: [host]         # promote event fields to labels — LOW CARDINALITY ONLY
+    # tenant: acme                 # X-Scope-OrgID; required by a multi-tenant Loki
+    # line_format: json            # message (default) or the whole event as a JSON line
+    # gzip: true                   # compress pushes (WAN-friendly)
+    # timeout: 10s                 # default
+    # batch_max_bytes: 1048576     # default 1 MiB; larger batches split into several pushes
+    # dead_letter_dir: /var/lib/logrok-agent/loki-rejected   # payloads Loki permanently rejected
+
+# --- Grafana Cloud variant -------------------------------------------------
+# Cloud puts the instance ID in the basic-auth user and the API token in the
+# password; the endpoint is the "Logs" push URL from your stack's details page.
+#
+# outputs:
+#   - type: loki
+#     endpoint: "https://logs-prod-eu-west-0.grafana.net"
+#     basic_auth_user: "123456"        # your instance ID
+#     basic_auth_password: "<api-token>"
+#     labels: { job: luna, env: prod }
+#     structured_metadata: true
+#     gzip: true
