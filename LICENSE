@@ -12,10 +12,13 @@ If you do not accept it, do not use the Software.
   images, and accompanying documentation distributed by Logiqum.
 - **Core** — the free capability set the Software runs with **no license** (file
   tail, syslog-in, journald, HTTP-in, parsers, TLS syslog output, metrics).
-- **Apex** — the paid capability set (incl. Windows Event Log, disk
-  store-and-forward spool, central fleet management, edge reduction, per-agent
-  mTLS, ack'd relay, Kubernetes container-log, macOS unified-log, UDP/data-diode
-  output, experimental OS architectures).
+- **Apex** — the paid capability set: every capability of the Software that is
+  not Core (incl. Windows Event Log, ETW, WMI, Linux audit, MQTT ingest, disk
+  store-and-forward spool, central fleet management, edge reduction, redaction,
+  enrichment, per-agent mTLS, ack'd relay, Kubernetes container-log, macOS
+  unified-log, UDP/data-diode output, multi-destination fan-out, SNMP trap and
+  Modbus collection, every output destination other than RFC 5424 syslog, and
+  experimental OS architectures).
 - **Agent** — one running instance of the Software on one host. Counting is
   **per Agent, not per container or per source.**
 - **Entitlement** — a Logiqum-signed grant (enrollment-derived from a licensed
@@ -43,6 +46,11 @@ Software as follows:
   capabilities continue for a **grace period (default 30 days)**, after which the
   Software **degrades to Core** and continues running. The Software never ceases
   operating, and never grants more than Core without a valid Entitlement.
+- **2.4 Notice period for newly enforced Apex capabilities.** Where a capability
+  is Apex but an earlier release of the Software did not enforce it, the Software
+  will warn about unlicensed use of that capability but will not disable it
+  before the next major version. Core is not reduced: a capability listed as Core
+  in §1 stays free.
 
 ## 3. Restrictions
 You may not: (a) redistribute, resell, rent, lease, sublicense, or host the

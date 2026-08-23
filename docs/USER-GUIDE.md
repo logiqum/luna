@@ -150,14 +150,52 @@ Uninstall (keeps spool + config):
 sudo /usr/local/bin/logrok-universal-agent-uninstall
 ```
 
-### Solaris (supported) · AIX / BSDs (extended, cross-compiled)
+### Every platform we ship, and how far each is verified
+
+One table, because "supported" means different things at different tiers and you should be able to
+see which one your target sits in.
+
+| Platform | How it is verified |
+|---|---|
+| `linux/amd64` | **Native.** The full test suite, race detector, end-to-end tests against real receivers, and the performance gate all run here on every change. The most heavily exercised target by a wide margin. |
+| `windows/amd64` | **Real hardware.** Full Windows suite plus the Event Log / ETW / WMI readers and durability tests, run on a real Windows machine in the release gate. |
+| `darwin/amd64`, `darwin/arm64` | **Real hardware.** Full macOS suite including the unified-log reader, run on a real Mac in the release gate. |
+| `solaris/amd64` | **Real hardware.** Full suite on Solaris 11.4. |
+| `freebsd/amd64` | **Real hardware.** Full suite on FreeBSD 15.1. Covers pfSense / OPNsense / TrueNAS-class appliances. |
+| `openbsd/amd64` | **Real hardware.** Full suite on OpenBSD 7.9. |
+| `netbsd/amd64` | **Real hardware.** Full suite on NetBSD 11.0. |
+| `linux/arm64`, `linux/arm` (v7) | **Emulated.** The binary runs the full pipeline — file tail → disk spool → RFC 5424 syslog over TCP — under an instruction-set emulator in the release gate. Raspberry Pi / SBC class. |
+| `linux/riscv64` | **Emulated.** Same pipeline run. RISC-V SBCs and edge boxes. |
+| `linux/mipsle` (softfloat) | **Emulated.** Same pipeline run. MIPS little-endian routers and gateways; built softfloat so FPU-less chips run it. |
+| `windows/arm64` | **Cross-compiled.** Builds and links; not executed on that architecture. Its amd64 sibling is verified on real hardware. |
+| `freebsd/arm64` | **Cross-compiled.** Builds and links; not executed on that architecture. Its amd64 sibling is verified on real hardware. |
+| `aix/ppc64` | **Cross-compiled.** Builds and links; not executed. If you run an AIX estate we would like to change that — see below. |
+
+**Reading the tiers honestly:**
+
+- **Real hardware** is the strongest claim: the actual operating system, the actual platform code paths.
+- **Emulated** means the binary genuinely executed and moved events end to end, on an emulator that
+  models the instruction set. It is a real run, not a compile check — but it models no real I/O,
+  timing, or board behaviour. A smoke test on an actual board would be stronger, and we would like
+  to do that.
+- **Cross-compiled** means exactly what it says: it builds, and nothing has run it.
+
+There is no platform-specific code in the file-tail, syslog-in/out or spool paths, which is why the
+lower tiers are credible at all — but that is an argument, not evidence, and the table above is the
+evidence.
+
+### Solaris (supported) · AIX / BSDs / RISC-V / MIPS (extended tier)
 Releases ship binaries for `solaris-amd64`, `aix-ppc64`, `freebsd-{amd64,arm64}`, `openbsd-amd64`,
 `netbsd-amd64`, `linux-riscv64` (RISC-V SBCs/edge boxes), and `linux-mipsle` (MIPS little-endian
 routers/gateways; built softfloat so FPU-less chips run it) (pure-Go cross-builds; file tail +
 syslog-in/out + spool work identically — there's no platform-specific code in those paths). FreeBSD notably covers pfSense/OPNsense/TrueNAS-class appliance
 hosts. **`solaris-amd64`, `freebsd-amd64`, `openbsd-amd64` and `netbsd-amd64` are runtime-verified** — the full
 test suite runs on each real OS (Solaris 11.4, FreeBSD 15.1, OpenBSD 7.9, NetBSD 11.0) as part of the release
-verification. **AIX, riscv64 and mipsle are cross-compiled and vetted but not yet runtime-verified** — treat accordingly. Binary only: bring your own service integration (SRC `mkssys` on AIX,
+verification. **`linux-riscv64` and `linux-mipsle` are runtime-verified under emulation** — each binary runs
+the full pipeline (file tail → disk spool → RFC 5424 syslog over TCP) under an instruction-set emulator as
+part of the release gate. That is a real execution rather than a compile check, but it is not hardware: it
+models no real I/O, timing or board behaviour. **AIX ppc64 is cross-compiled and vetted but not executed** —
+treat accordingly. Binary only: bring your own service integration (SRC `mkssys` on AIX,
 SMF manifest on Solaris, `rc.d` on the BSDs). If you run an AIX/BSD estate (banks: your Power boxes), we're
 looking for design partners — your feedback drives those to runtime-verified status too. (HP-UX is not
 possible: Go has no HP-UX port.)
@@ -1586,11 +1624,22 @@ Three properties worth knowing:
 ## Licensing
 
 The agent has a free **Core** tier (file tail, syslog/journald/HTTP inputs, parsers, TLS
-syslog output, metrics — no license needed, at any scale) and a paid **Apex** tier for the
-gated capabilities (Windows Event Log, disk spool, fleet management, edge reduction,
-enrolled mTLS, relay, Kubernetes container logs, macOS `oslog`, UDP/data-diode output,
-extended OS platforms). Full model, license-file format, and state machine:
-[LICENSING.md](LICENSING.md).
+syslog output, metrics — no license needed, at any scale) and a paid **Apex** tier for
+everything else. The line: **Core collects from the host and forwards one open standard —
+RFC 5424 syslog over TCP/TLS — to one destination.** Anything that reads a privileged or
+proprietary OS subsystem (Windows Event Log, ETW, WMI, `linux_audit`, `oslog`), speaks a
+named vendor or platform API (`hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`,
+`snare`), or adds fleet-scale machinery (disk spool, fleet management, edge reduction,
+enrolled mTLS, relay, Kubernetes container logs, UDP/data-diode output, fan-out, extended
+OS platforms) is Apex. TLS is never gated. Full model, license-file format, and state
+machine: [LICENSING.md](LICENSING.md).
+
+> **Upgrading from 1.1.x or earlier — read this.** Fifteen modules are Apex but were not
+> marked or checked in earlier releases: `etw`, `wmi`, `linux_audit`, `mqtt_in`, `redact`,
+> `lookup`, `adaptive_sample`, and the eight non-syslog outputs. **This release disables
+> none of them.** If your entitlement doesn't cover them you get a startup warning naming
+> them and posture `degraded`, and they keep running — they are disabled only in the next
+> **major** version. Nothing was removed from Core.
 
 The short operator version:
 
@@ -1638,6 +1687,7 @@ that archive are what to hand them. Anything missing: `security@logiqum.com`.
 |---|---|---|
 | An input/processor/output from your config is missing after an upgrade or restart, and startup logs `licensing: degraded to Core — unlicensed Apex features disabled` | the config uses Apex capabilities without a covering license (or the license expired and its grace window ended) | install/renew the license (`licensing.license_file`, or enroll with a logrok control plane) and restart — the features come back immediately. For a controlled transition window, contact support — temporary enforcement exceptions can be arranged (see [LICENSING.md](LICENSING.md)) |
 | Startup logs `licensing: Apex features are in the grace window` with `days_left` | the license expired; the grace window is running | renew before `days_left` reaches 0 to avoid degrade-to-Core; watch `logrok_agent_license_grace_days_left` |
+| Startup logs `licensing: this config uses paid (Apex) features that your entitlement does not cover — they KEEP RUNNING for now…`, posture reads `degraded`, but **every module is still working** | the config uses one or more of the modules newly marked Apex (`etw`, `wmi`, `linux_audit`, `mqtt_in`, `redact`, `lookup`, `adaptive_sample`, or a non-syslog output). This is the notice period — reported, not enforced | nothing breaks now, but they **are** disabled at the next major version. Before then: install a license (`licensing.license_file`), enroll with a logrok control plane, or move the pipeline to Core modules. The warning names exactly which modules are affected |
 | `buffer_depth` rising, `events_out` flat | aggregator unreachable / TLS rejected | check `endpoint`, firewall, and the TLS material; logs show "output unavailable, buffering" |
 | Spooled events not draining after the aggregator recovered | the output's writes are still failing (stale DNS, a proxy accepting connections the backend can't service, TLS/mTLS rejection) | the agent warns `spool drain blocked` with the exact write error while the spool can't drain (first failure immediately, then every 30s) and logs `spool drain resumed` when delivery restarts — read the error in that warning; delivery retries indefinitely, nothing is dropped while spool capacity remains |
 | TLS handshake / "unknown authority" | wrong/missing `ca_file` | point `ca_file` at the CA that signed the aggregator cert |

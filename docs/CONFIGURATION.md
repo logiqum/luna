@@ -187,6 +187,31 @@ The agent computes a license **posture** at every config load — `core` (no gat
 heartbeat. An unreadable/invalid license falls back to the free Core entitlement. A valid license is
 required for licensed features; free Core features are always available in every posture.
 
+### Modules newly marked Apex — notice period, nothing stops working yet
+
+The modules below are Apex, and are marked **Apex** in their reference sections above. Earlier
+releases did not mark them and did not check them, so a configuration built on this release's
+predecessors may be using them without an entitlement:
+
+| | Modules |
+|---|---|
+| Inputs | `etw` · `wmi` · `linux_audit` · `mqtt_in` |
+| Processors | `redact` · `lookup` · `adaptive_sample` |
+| Outputs | `snare` · `hec` · `sentinel` · `xsiam` · `kafka` · `s3` · `loki` · `otlp` |
+
+**Nothing is disabled in this release.** If your entitlement does not cover them, the agent logs a
+warning naming the modules, reports posture `degraded`, and **keeps running every one of them**. They
+are disabled only in the next **major** version — so you have a full release line to add a license
+(`license_file`), enroll with a logrok control plane, or change the configuration.
+
+The free **Core** tier is unchanged and is exactly what it has always been: file tail, syslog-in,
+journald, HTTP-in, the parsers (`parse_json`/`parse_csv`/`parse_kv`/`parse_xml`/`expr`/`add_fields`/
+`filter`), RFC 5424 syslog output over TCP/TLS, and `/metrics`. Nothing was taken out of Core. Core
+forwarding is never blocked in any posture, and TLS is never gated.
+
+To check a configuration before upgrading, start the agent and read the startup log: a `licensing:`
+warning naming modules is the notice; no such line means the configuration is unaffected.
+
 ---
 
 ## `inputs`
@@ -250,7 +275,7 @@ walkthrough in the [User Guide](USER-GUIDE.md#windows-security-telemetry--sysmon
 channel is collectible the same way — `channels: [ForwardedEvents]` on the WEC host drains the whole
 WEF estate through one agent. (Acting as a WEC *server* is out of scope; per-endpoint agents replace WEF.)
 
-### `etw` ✅ *(runtime-verified on real Windows hardware)* — Windows only
+### `etw` ✅ *(runtime-verified on real Windows hardware)* — Windows only — **Apex**
 
 Consumes **ETW (Event Tracing for Windows)** providers through an agent-owned **real-time trace session** —
 the high-volume kernel/analytic telemetry that never reaches the Event Log (kernel process/network activity,
@@ -311,7 +336,7 @@ inputs:
     match_any_keyword: "0x10"                        # WINEVENT_KEYWORD_PROCESS
 ```
 
-### `wmi` ✅ *(compile+unit-verified; runtime-validated on Windows hardware)* — Windows only
+### `wmi` ✅ *(compile+unit-verified; runtime-validated on Windows hardware)* — Windows only — **Apex**
 
 Polls **WMI (Windows Management Instrumentation)** with a **WQL** query and forwards each returned CIM
 instance as an event — the NXLog `im_wmi` parity input. WMI is Windows' system-inventory and live-state
@@ -509,7 +534,7 @@ whole-request read timeout, and a **5-minute idle keep-alive deadline** — so a
 dribbles a request body or opens an idle connection can't hold a handler open (slow-loris). Fixed defaults,
 not configurable.
 
-### `mqtt_in` ✅ — cross-platform (MQTT subscriber; IoT/edge ingest)
+### `mqtt_in` ✅ — cross-platform (MQTT subscriber; IoT/edge ingest) — **Apex**
 
 Subscribes to an MQTT broker and turns each published message into an event — the common IoT/edge shape
 where sensors and devices publish telemetry to a broker rather than writing files or speaking syslog.
@@ -717,7 +742,7 @@ the at-least-once note under [`buffer`](#buffer)). The checkpoint is deliberatel
 journalctl only persists that on a graceful exit it never gets under service management (verified on
 systemd 249 — nothing saved under SIGTERM/SIGINT/SIGKILL), which would have made every resume silently lossy.
 
-### `linux_audit` ✅ *(Linux only)*
+### `linux_audit` ✅ *(Linux only)* — **Apex**
 
 Collects **Linux kernel audit records** — the security trail the kernel's audit subsystem emits and auditd
 persists: process executions with full command lines (execve rules), file-access watches, logins, privilege
@@ -955,7 +980,7 @@ Drop attribution is tracked per processor: scrape `logrok_agent_processor_droppe
 When `suppress_count` is enabled (default on), the next event that passes after a suppressed run carries a
 `suppress_count` field with the number of events that were dropped.
 
-#### `sample` ✅ — 1-in-N probabilistic sampler
+#### `sample` ✅ — 1-in-N probabilistic sampler — **Apex**
 
 Keeps 1 event in N, where N = round(1/`ratio`). Without a `key`, uses a counter (sequential); with a `key`,
 hashes the key for consistent sampling (the same key value always gets the same decision). The effective
@@ -1002,7 +1027,7 @@ Two honest caveats, by design: the window is the **UTC calendar day** (tumbling)
 budget is **in-memory — an agent restart refills it**. Treat the cap as an operating dial, not a
 billing guarantee.
 
-### `throttle` ✅ — per-key rate cap
+### `throttle` ✅ — per-key rate cap — **Apex**
 
 Allows at most `max` events per `window` per key (or globally when `key` is omitted). Excess events in the
 window are dropped. The next event that passes after a suppressed window carries `suppress_count` (by default).
@@ -1032,7 +1057,7 @@ the count. Omitting `key` uses a single global bucket across all events.
   keep_if: 'fields.event_id == "4625" && severity <= 3'
 ```
 
-#### `adaptive_sample` ✅ — hold volume near a target by adjusting the sample rate
+#### `adaptive_sample` ✅ — hold volume near a target by adjusting the sample rate — **Apex**
 
 Measures how many events a window carried and picks a sampling rate for the next one, so output
 tracks a target as input rises and falls. Never mutates the message.
@@ -1074,7 +1099,7 @@ The first window after startup admits everything: with no measurement there is n
   keep_min_severity: 3    # never sample warnings and worse
 ```
 
-#### `dedup` ✅ — per-key window deduplication
+#### `dedup` ✅ — per-key window deduplication — **Apex**
 
 Keeps the first event per key per window; identical repeats within the window are dropped. The default key
 is `[host, message]` (60s window). The special key `["*"]` treats the full event (all fields) as the
@@ -1106,7 +1131,7 @@ Using `["*"]` to deduplicate by exact event identity (all fields must match):
   window: 5m
 ```
 
-#### `trim_fields` ✅ — field drop and value truncation
+#### `trim_fields` ✅ — field drop and value truncation — **Apex**
 
 Shrinks event bytes by removing unwanted fields and/or truncating long values. Never drops events. `keep_only`
 is applied first; then `drop`/`drop_matching`; then truncation of remaining values. Truncated values are
@@ -1133,7 +1158,7 @@ up to N+3 bytes. Size limits at your SIEM or syslog receiver must account for th
   max_field_bytes: 512
 ```
 
-#### `redact` ✅ — remove sensitive values before they leave the host
+#### `redact` ✅ — remove sensitive values before they leave the host — **Apex**
 
 Rewrites matching substrings in the message and/or field values. Never drops events.
 
@@ -1173,7 +1198,7 @@ rainbow-table lookup of the original value.
   skip_fields: [host]              # never scrub the routing metadata
 ```
 
-#### `lookup` ✅ — enrich events from a local table (asset inventory, CMDB export)
+#### `lookup` ✅ — enrich events from a local table (asset inventory, CMDB export) — **Apex**
 
 Reads one field's value, finds the matching row in a table, and copies that row's columns onto the event.
 Never drops events.
@@ -1351,7 +1376,7 @@ key becomes `_`. The **PRI** value is clamped defensively — severity into 0–
 peer-injected out-of-range value can never emit a malformed `<247>`/`<-1>` frame a strict receiver rejects.
 Server verification is **on by default** when `tls: true`; `insecure_skip_verify` is the only way to disable it.
 
-### `snare` ✅ — Snare-format (SnareCore) over syslog, for SIEM-legacy interop
+### `snare` ✅ — Snare-format (SnareCore) over syslog, for SIEM-legacy interop — **Apex**
 
 Emits events as the legacy **Snare format** — the tab-delimited `MSWinEventLog` line that the Snare
 Windows Agent and NXLog's `om_snare` produce, and that many SIEM ingest pipelines (rsyslog
@@ -1390,7 +1415,7 @@ where that is the convention). The transport (dial, TLS/mTLS, TCP/UDP framing, c
 the **same code path as the `syslog` output** — the Snare format is only a different line serializer, not a
 second network stack.
 
-### `otlp` ✅ — OpenTelemetry Protocol (gRPC or HTTP)
+### `otlp` ✅ — OpenTelemetry Protocol (gRPC or HTTP) — **Apex**
 
 Forwards events as **OTLP logs** to an OpenTelemetry Collector or any backend with a native OTLP ingest
 endpoint — the output to use when your downstream is OTel-native rather than syslog-speaking. Events
@@ -1443,7 +1468,7 @@ its default `:4317` — set `protocol: grpc` with `tls: false` for a LAN/dev col
 `ca_file`/mTLS) once TLS terminates in front of it. `encoding` only applies to `protocol: http`; gRPC is always
 binary protobuf on the wire.
 
-### `hec` ✅ *(verified end-to-end against a real Splunk instance in both commit modes, including sustained-outage recovery with zero event loss)* — Splunk HTTP Event Collector
+### `hec` ✅ *(verified end-to-end against a real Splunk instance in both commit modes, including sustained-outage recovery with zero event loss)* — Splunk HTTP Event Collector — **Apex**
 
 Forwards events to **Splunk's HTTP Event Collector (HEC)** — the standard Splunk ingest path, and the
 sink to reach for when the destination is Splunk rather than a syslog-speaking aggregator. Two commit
@@ -1493,7 +1518,7 @@ unrecognized response code, and ordinary network/timeout failures — is treated
 stays in the disk spool and is retried, and events are never dropped for a condition the operator can fix
 (e.g. a bad token) or that is merely transient.
 
-### `loki` ✅ *(verified end-to-end against a real Grafana Loki instance — events query-verified after delivery, and after a sustained receiver outage with zero event loss)* — Grafana Loki
+### `loki` ✅ *(verified end-to-end against a real Grafana Loki instance — events query-verified after delivery, and after a sustained receiver outage with zero event loss)* — Grafana Loki — **Apex**
 
 Pushes events to Loki's ingest API (`POST /loki/api/v1/push`).
 
@@ -1541,7 +1566,7 @@ stays in the disk spool and is retried, so a rate limit or a fixable credential 
   gzip: true
 ```
 
-### `kafka` ✅ — Apache Kafka / Kafka-compatible brokers (Redpanda, …)
+### `kafka` ✅ — Apache Kafka / Kafka-compatible brokers (Redpanda, …) — **Apex**
 
 Produces events to a Kafka topic — the sink to reach for when the destination is a Kafka-based
 pipeline or data lake rather than a syslog receiver. Acked like `otlp`/`hec`: the producer's
@@ -1580,7 +1605,7 @@ outputs:
     ca_file: /etc/logrok-agent/kafka-ca.pem
 ```
 
-### `s3` ✅ — Amazon S3 / S3-compatible object stores (MinIO, Ceph, R2, …)
+### `s3` ✅ — Amazon S3 / S3-compatible object stores (MinIO, Ceph, R2, …) — **Apex**
 
 Writes event batches as objects to an S3 bucket — the sink for data-lake and archive patterns
 (Athena, Snowflake, security-data-lake tooling all ingest the produced layout directly). Each
@@ -1652,7 +1677,7 @@ outputs:
   #   # flush_interval: 5m
 ```
 
-### `sentinel` ✅ — Microsoft Sentinel / Azure Monitor Logs (Logs Ingestion API)
+### `sentinel` ✅ — Microsoft Sentinel / Azure Monitor Logs (Logs Ingestion API) — **Apex**
 
 Sends events to a Log Analytics workspace — and thereby Microsoft Sentinel — via the modern **Logs
 Ingestion API** with a Data Collection Rule (DCR). Batches are posted as JSON arrays (gzipped by
@@ -1691,7 +1716,7 @@ outputs:
     # credentials fall back to AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET
 ```
 
-### `xsiam` ✅ — Palo Alto Cortex XSIAM (HTTP log collector)
+### `xsiam` ✅ — Palo Alto Cortex XSIAM (HTTP log collector) — **Apex**
 
 Sends events to a Cortex XSIAM tenant via its HTTP log collector — batches post as
 newline-delimited records (gzipped by default, split automatically under the vendor-recommended
