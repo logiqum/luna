@@ -168,7 +168,7 @@ see which one your target sits in.
 | `linux/riscv64` | **Emulated.** Same pipeline run. RISC-V SBCs and edge boxes. |
 | `linux/mipsle` (softfloat) | **Emulated.** Same pipeline run. MIPS little-endian routers and gateways; built softfloat so FPU-less chips run it. |
 | `windows/arm64` | **Cross-compiled.** Builds and links; not executed on that architecture. Its amd64 sibling is verified on real hardware. |
-| `freebsd/arm64` | **Cross-compiled.** Builds and links; not executed on that architecture. Its amd64 sibling is verified on real hardware. |
+| `freebsd/arm64` | **Emulated.** The binary runs the full pipeline — file tail → disk spool → RFC 5424 syslog over TCP — inside an emulated machine booting a real FreeBSD arm64 kernel. Note this is a stronger claim than the Linux emulated rows: there the host kernel serves the syscalls, here the operating system is genuinely FreeBSD. The hardware is still emulated. Its amd64 sibling is verified on the real OS. |
 | `aix/ppc64` | **Cross-compiled.** Builds and links; not executed. If you run an AIX estate we would like to change that — see below. |
 
 **Reading the tiers honestly:**
