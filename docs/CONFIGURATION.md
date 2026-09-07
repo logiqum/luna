@@ -28,6 +28,8 @@ write-fail)`. Multiple outputs fan out — every destination gets every event, e
 | `mode` | string | `service` | ✅ | `service` (Windows Service / daemon) or `standalone` (foreground) |
 | `log_level` | string | `info` | ✅ | `debug` \| `info` \| `warn` \| `error` (structured `slog` JSON) |
 | `metrics_listen` | string | `""` (off) | ✅ | e.g. `127.0.0.1:9090` → serves Prometheus text at `/metrics` **and the live-sampling endpoint `/tap`** (see [Watching live events](USER-GUIDE.md#watching-live-events--tap)). **Bind localhost** unless scraped remotely — `/tap` is refused outright on a non-loopback bind, because it exposes event content. |
+| `fips_mode` | string | `auto` | **A check, not a switch.** `auto` (default) has no opinion · `required` refuses to start unless the binary is running in FIPS 140-3 mode · `disabled` refuses to start if it is. FIPS mode is selected when the binary is **built** and locked at process start, so no configuration can turn it on or off — what this buys is catching the **wrong artifact**. The FIPS and standard builds are identical in every observable way except the crypto module, so without this a regulated deployment can only discover it shipped the wrong one during an audit. `disabled` is not symmetry for its own sake: a FIPS build refuses non-approved cipher suites, so an estate that must reach a legacy receiver needs to fail at startup rather than at the first delivery. See [FIPS 140-3 build](USER-GUIDE.md#fips-140-3-build) |
+| `fips` | string | *(unset — run as built)* | **Sets** the cryptographic posture (`fips_mode` only *checks* it). `on` or `off`; unset runs the binary as built, and the shipped build is FIPS. An explicit `on` on a non-FIPS build is a startup error, not a silent no-op. Applied at startup by re-executing the agent once with the right runtime setting — **the process ID does not change**, so service supervision is unaffected. Startup only: changing it needs a restart, not a reload. Turn it **off** only for a receiver that offers neither TLS 1.3 nor Extended Master Secret, which FIPS 140-3 requires for TLS 1.2 — Splunk HEC is the one we know of. **Windows:** there is no `execve` and a self-respawning service is read as a failed service, so set `GODEBUG=fips140=off` in the service environment instead; a disagreeing config value is reported, not ignored. See [Turning FIPS off](USER-GUIDE.md#turning-fips-off-for-a-receiver-that-cannot-do-it-servicefips) |
 
 **Metrics exposed:** `logrok_agent_events_in_total`, `events_out_total`, `events_dropped_total`,
 `backpressure_waits_total`, `spool_meta_write_errors_total`, `spool_write_errors_total`,
@@ -54,6 +56,9 @@ below.
 
 ## `management`
 
+Central management (a non-empty `endpoint`) and enrolled mTLS (`tls.mode: enrolled`) are **Apex** capabilities. On an
+unlicensed agent they keep running, but the agent reports posture `degraded`.
+
 Central control plane. **Empty `endpoint` = unmanaged** (runs purely from the local file — valid for air-gapped
 installs). Auth uses the logrok control-plane headers: `X-Api-Key` + `X-Tenant-Slug`. Per-agent **mTLS** hardens the channel on top of the api-key: set `tls.cert_file`/`tls.key_file` to present an operator-provisioned client certificate (`tls.mode: static`), or use `tls.mode: enrolled` to have the control plane issue and auto-renew a per-agent client certificate.
 
@@ -74,6 +79,7 @@ installs). Auth uses the logrok control-plane headers: `X-Api-Key` + `X-Tenant-S
 | `tls.key_file` | string | `""` | ✅ | client private key (PEM) for mTLS |
 | `tls.server_name` | string | `""` | ✅ | SNI / verification name override |
 | `tls.insecure_skip_verify` | bool | `false` | ✅ | **dev only** — disables server verification |
+| `tls.max_cert_age` | duration | `0` (off) | ✅ | **Enrolled mode only.** Renew the certificate once it reaches this age, even though it is far from expiry. Set this if your control plane rotates its agent CA **and issues long-lived certificates**. A rotation runs with an overlap period during which both the old and new roots are trusted, and an agent moves onto the new root **by renewing**. An agent whose certificate does not reach its normal renewal window during the overlap never moves; when the operator completes the rotation, the certificate it presents still chains to the retired root and the receiver rejects it. Nothing looks wrong until that moment. **Size it below two-thirds of your issued certificate lifetime** — that is where ordinary renewal already fires, so anything at or above it never takes effect (a value equal to the lifetime is a guaranteed no-op: the certificate expires before it can get that old). Costs one extra issuance per interval per agent. Left off by default because against a control plane issuing short-lived certificates the ordinary window already moves every running agent well inside a normal overlap. |
 
 **Remote config + hot-reload:** when the control plane serves a new config version, the agent validates it
 (same parser as local load), **refuses** configs that fail validation or would drop `management.endpoint`
@@ -216,7 +222,9 @@ warning naming modules is the notice; no such line means the configuration is un
 
 ## `inputs`
 
-### `windows_eventlog` ✅ *(verified end-to-end on real Windows hardware)* — Windows only
+### `windows_eventlog` ✅ *(verified end-to-end on real Windows hardware)* — Windows only — **Apex**
+
+**Apex, enforced immediately:** an unlicensed configuration has this input removed at load (it is not in the notice window that the modules marked Apex in 1.2.x get).
 
 Collects the **Windows Event Log** — the OS's structured, durable record of system, security, and
 application activity (logons, service installs, process creation, application errors). Point `channels`
@@ -428,7 +436,8 @@ stays at the open record's start, so a crash re-reads the in-flight record rathe
 
 #### `format` (container logs)
 
-`format: text | cri | docker | auto` (default `text`). When set to `cri`/`docker`/`auto`,
+`format: text | cri | docker | auto` (default `text`). Container-log mode — any value other than `text` — is
+**Apex** (an unlicensed agent removes the whole input); plain text tailing is Core. When set to `cri`/`docker`/`auto`,
 filetail parses Kubernetes container logs and reassembles partial (`P` → `F`) lines into one
 event. `auto` detects per-file from the first line (`{` ⇒ docker JSON, else CRI text).
 Mutually exclusive with `multiline`.
@@ -475,7 +484,7 @@ unauthenticated slow client can't pin connections open (slow-loris). A legitimat
 delivers a complete message within the window is never dropped. The deadline is a fixed default, not
 configurable.
 
-### `relay_in` ✅ — cross-platform (the ack'd-transport receiver)
+### `relay_in` ✅ — cross-platform (the ack'd-transport receiver) — **Apex**
 
 Listens for the agent's own acknowledged relay protocol — the receiving half of an agent→agent hop (the
 sending half is the [`relay` output](#relay---ackd-reliable-transport-agentagent)). Run it on a
@@ -803,7 +812,57 @@ inputs:
     mode: multicast            # requires CAP_AUDIT_READ (typically root)
 ```
 
-### `oslog` ✅ *(macOS only)*
+
+### `bsm_audit` ✅ *(Solaris and other BSM systems)* — **Apex**
+
+Collects the **Solaris BSM audit trail** — logins, privilege use, process execution and file changes — the
+NXLog `im_bsm` counterpart, and the file-integrity evidence source on the extended-platform tier. Each record
+arrives with the **actor**: the audit user, real user, process and session that caused it.
+
+**It decodes with the operating system's own `praudit`, not a reimplementation.** The trail is a binary token
+stream; hand-rolling a parser would mean reimplementing dozens of token layouts, where getting one subtly
+wrong produces plausible *wrong* values rather than an error — the worst failure mode for evidence. The agent
+runs `praudit -x` as a subprocess and consumes its XML, the same approach the `wmi` input takes with
+`Get-CimInstance`. Still cgo-free.
+
+**Fields are mapped generically.** Every element of a record becomes fields — `<subject>` attributes as
+`subject_uid`, `subject_audit-uid`, `subject_pid`, a `<path>` as `path`, a second one as `path.2`, and so on.
+Nothing enumerates token types, so a record type this release has never seen still arrives intact. The
+repeat-indexing convention is the same one `linux_audit` uses, so both trails read the same way.
+
+**Two prerequisites, and both are yours rather than the agent's:**
+
+1. **Read access to the trail.** `/var/audit` is `root:root` mode `0640`. The agent must be able to read it.
+2. **The audit flags select what is collected.** File-change records need the file classes enabled
+   (`auditconfig`), exactly as `linux_audit` needs auditd rules. **With no relevant flags there is simply no
+   traffic** — which looks identical to a broken input, so check the flags before suspecting the agent.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `dir` | string | `/var/audit` | Directory auditd writes trails to. The **active** trail is the one named `*.not_terminated.*`; on rotation auditd renames it and creates a new one, and the input follows across |
+| `read_from` | string | `end` | `end` (new records only) or `beginning` (the whole active trail). **There are only two** because praudit cannot be started at an arbitrary offset — see the checkpoint note below |
+| `praudit` | string | `praudit` | Path to the decoder, if it is not on `PATH` |
+| `poll_interval` | duration | `1s` | How often to check for new bytes and for a rotated trail |
+| `source` | string | `bsm_audit` | `Event.Source` label |
+
+Severity is notice (5) and facility 13 (`log audit`) — the same pair `linux_audit` uses, so both trails land
+identically in a receiver's routing rules.
+
+**Checkpointing (documented limitation, same as `linux_audit`).** The input persists **no byte offset**: a
+restart resumes per `read_from`. This is a consequence of the format, not an omission — `praudit` fails on a
+stream that begins mid-record (`No code associated with token id …`), because BSM framing is only recoverable
+from a record boundary, and finding one would mean parsing the binary layout the subprocess exists to avoid.
+Only offset 0 and end-of-file are guaranteed boundaries. Records missed during a restart remain in the trail
+file and can be replayed with `read_from: beginning`.
+
+```yaml
+inputs:
+  - type: bsm_audit
+    # dir: /var/audit
+    # read_from: end          # end (default) | beginning
+    # poll_interval: 1s
+```
+### `oslog` ✅ *(macOS only)* — **Apex**
 Reads the macOS unified log (OSLog) by running `/usr/bin/log show|stream --style ndjson` as a subprocess
 (keeps the binary static + cgo-free — an internal architecture decision). On non-macOS builds this is a stub that
 errors if started. On startup it **backfills** the gap since the last run via `log show --start <checkpoint>`,
@@ -977,7 +1036,7 @@ that bypasses reduction for security-critical events:
   of severity. Uses `&&`/`||` operators. Example: `'severity <= 3 && fields.event_id == "4624"'`.
 
 Drop attribution is tracked per processor: scrape `logrok_agent_processor_dropped_total{processor="<name>"}`.
-When `suppress_count` is enabled (default on), the next event that passes after a suppressed run carries a
+When `suppress_count` is enabled (default on; it exists on `throttle`, `dedup` and `quota` — `sample` has no such option), the next event that passes after a suppressed run carries a
 `suppress_count` field with the number of events that were dropped.
 
 #### `sample` ✅ — 1-in-N probabilistic sampler — **Apex**
@@ -1252,6 +1311,59 @@ copy already in memory, so enrichment degrades to *stale*, never to *absent*. A 
   default: { owner: unassigned, env: unknown }
 ```
 
+#### `file_hash` ✅ — attach a changed file's digest to the event that reported the change — **Apex**
+
+Reads a path out of the event, hashes that file, and adds the digest to the event. Never drops events.
+
+**This is the content half of file-integrity evidence.** The agent's file-change events already carry the
+**actor** — who touched the path, when, with which command line (auditd watch rules on Linux; Sysmon or
+object-access auditing on Windows). What they don't carry is *what the file now is*. Adding the digest here
+lets your platform compare content against whatever baseline it keeps, while the event still names the person
+responsible. The agent keeps no baseline and makes no judgement about whether a change was authorised — see
+[File-integrity events](USER-GUIDE.md#file-integrity-events-fim--what-the-agent-does-and-what-it-deliberately-doesnt).
+
+**`roots` is required, and it is a security control.** The path comes out of an event, and on a pipeline fed
+by `http_in` or a relay an event can be attacker-influenced. Without a bound, "hash the path in this field"
+would let a crafted event ask the agent to read any file its user can open and publish a digest of it — which
+for a small or known-format file is a disclosure, not a checksum. Symlinks are resolved **before** the check,
+so a link inside an allowed directory cannot reach outside it. There is deliberately no permissive default.
+
+**The digest describes the file when it was hashed, not when it changed.** The event arrives after the write,
+so the file may have been written again, replaced or deleted in between. That race is inherent to hashing an
+event stream. Every event therefore gets a `<prefix>hash_status` saying what happened, so a missing digest is
+a recorded outcome rather than a silently absent field.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `path_fields` | list | *(required)* | Event fields that may hold the path; the **first non-empty one wins**. One processor serves several sources: `[path, TargetFilename, ObjectName]` covers auditd, Sysmon and Windows object-access auditing |
+| `roots` | list | *(required)* | Directories whose files may be hashed, e.g. `[/etc, /usr/bin]`. A path resolving outside every root is refused with status `denied`. **No default — see above** |
+| `algorithm` | string | `sha256` | `sha256`, `sha512` or `sha1`. `sha1` is offered so you can compare against an existing scan-and-checksum FIM baseline without rehashing an estate; it is not the default |
+| `max_size` | int | `67108864` (64 MiB) | Files larger than this are skipped with status `too_large`. Hashing is O(size) on the pipeline, so an unbounded cap turns one large file landing in a watched directory into a collection stall |
+| `prefix` | string | `file_` | Prefix for the added fields → `file_hash`, `file_hash_algo`, `file_size`, `file_hash_status` |
+| `cache` | int | `1024` | Remembered `(path, mtime, size)` → digest entries. A file under active write produces many events; without the memo each costs a full re-read |
+| `overwrite` | bool | `false` | Re-hash even when the event already carries a digest. Leave off behind a relay: the upstream hop hashed the file where it actually lives, and this host's filesystem is the wrong one to consult |
+
+`<prefix>hash_status` is always set, to exactly one of:
+
+| Status | Meaning |
+|---|---|
+| `ok` | hashed; `file_hash`, `file_hash_algo` and `file_size` are set |
+| `no_path` | none of `path_fields` held a value — usually a `path_fields` list that doesn't match this source |
+| `not_found` | the file was gone by the time it was read (the race above) |
+| `denied` | resolved outside every configured root, or could not be resolved at all |
+| `too_large` | above `max_size` |
+| `not_regular` | a directory, device, socket or FIFO. Not merely uninteresting — hashing a device node never returns |
+| `unreadable` | permissions or an I/O error |
+
+```yaml
+- type: file_hash
+  path_fields: [path, TargetFilename, ObjectName]   # auditd / Sysmon / object-access auditing
+  roots: [/etc, /usr/bin, /usr/sbin]                # required: only these may be hashed
+  algorithm: sha256
+  max_size: 33554432                                # 32 MiB
+  prefix: file_                                     # -> file_hash, file_hash_status, ...
+```
+
 ---
 
 ## `outputs`
@@ -1288,7 +1400,7 @@ buffer:
   same per-destination metrics series, so such pairs are rejected with the colliding key named.
 - **Per-output `when:` routing** — an optional condition (the same expression grammar as the
   `expr`/`filter` processors: `severity <= 3`, `fields.app == "nginx"`, `message contains "auth"`,
-  combined with `and`/`or`/`not`) restricts which events reach that destination. Absent = the
+  combined with `&&`/`||`/`!`) restricts which events reach that destination. Absent = the
   destination receives every event. An event matching **no** destination is intentionally
   discarded (counted under the `routing_when` drop family) — **a `when:`-filtered event is gone; it
   is not spooled anywhere**, so keep a catch-all destination if you need one. A bad expression is
@@ -1313,9 +1425,6 @@ buffer:
   `logrok_agent_output_events_out_total{output="siem"}`, `..._events_dropped_total`,
   `..._buffer_depth`, `..._spool_generation` — while the fleet-wide unlabeled totals remain the sums
   across destinations.
-- Per-output routing/filtering (`when:` conditions) is not part of fan-out v1; every destination
-  receives every event. Use per-destination processors downstream or a filter processor ahead of the
-  outputs.
 
 ### `syslog` ✅ — RFC 5424 over TCP (TLS/mTLS) or UDP (diode mode)
 
@@ -1328,7 +1437,7 @@ structured data — or as a JSON message body with `encoding: json`.
 | Option | Type | Default | Notes |
 |---|---|---|---|
 | `endpoint` | string | *(required)* | `host:port` of the aggregator (logrok syslog-ng by default) |
-| `protocol` | string | `tcp` | `tcp` or `udp`. UDP sends **one datagram per message** (RFC 5426, no framing) — required for **hardware data diodes** (Waterfall/Owl pass UDP only) and plain `udp()` receivers. UDP is fire-and-forget: no delivery guarantee on the wire; pair with `sequence` for receiver-side gap detection |
+| `protocol` | string | `tcp` | `tcp` or `udp`. UDP sends **one datagram per message** (RFC 5426, no framing) — required for **hardware data diodes** (Waterfall/Owl pass UDP only) and plain `udp()` receivers. UDP is fire-and-forget: no delivery guarantee on the wire; pair with `sequence` for receiver-side gap detection **UDP diode mode is Apex**; RFC 5424 over TCP/TLS is Core. |
 | `framing` | string | `newline` | **TCP only.** `newline` (one message per LF — what syslog-ng's `network()` source and most receivers expect) or `octet-counting` (RFC 6587 `LEN SP MSG`; preserves embedded newlines but needs an octet-counting-aware receiver, e.g. syslog-ng's `syslog()` source). Setting it with `protocol: udp` is a config error |
 | `sequence` | bool | `false` | add a `[seq@66371 session=".." n=".."]` SD element with a per-event monotonic counter. A receiver behind a one-way link detects **loss** (gaps in `n`) and **agent restarts** (`session` change). Counters are assigned at send time, so retried batches get fresh numbers — `n` detects gaps, not duplicates |
 | `max_datagram_size` | int | `8192` | **UDP only.** Datagrams are truncated to this many bytes (an over-MTU/oversized send would otherwise fail forever and wedge the spool drain). A truncation counts `logrok_agent_udp_truncated_total` and logs a one-time WARN, so a too-small value is visible rather than silently cutting messages — raise it if your receiver accepts more |
@@ -1749,7 +1858,7 @@ outputs:
     # api_key falls back to XSIAM_API_KEY
 ```
 
-### `relay` ✅ — ack'd reliable transport (agent→agent)
+### `relay` ✅ — ack'd reliable transport (agent→agent) — **Apex**
 
 Sends events to another agent — a [`relay_in`](#relay_in---cross-platform-the-ackd-transport-receiver)
 gateway/concentrator — over the agent's own acknowledged protocol. Use it for the hops where plain TCP
@@ -1794,7 +1903,7 @@ outputs:
     key_file: /etc/logrok-agent/agent.key
 ```
 
-**Diode mode — one-way link (data diode / unidirectional gateway) out of an OT zone:**
+**Diode mode — one-way link (data diode / unidirectional gateway) out of an OT zone** (UDP diode mode is an **Apex** capability):
 ```yaml
 # Send-only profile: UDP (diodes pass UDP only), sequence SD for receiver-side
 # gap detection, disk spool so a NIC/link outage loses nothing locally, and no

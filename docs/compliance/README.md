@@ -9,8 +9,9 @@ operator, the doc says so.
 > as of 2026-06. Verify against the current standard text and your assessor's interpretation.
 
 > **Licensing note.** These mappings describe the agent's capability, not its free tier. Several of the
-> capabilities cited — Windows Event Log, the Linux kernel audit trail (`linux_audit`), redaction, disk
-> store-and-forward, fleet management — are **Apex** (paid, and included at no charge with a licensed
+> capabilities cited — Windows Event Log, the Linux kernel audit trail (`linux_audit`), the Solaris audit
+> trail (`bsm_audit`), redaction, disk store-and-forward, UDP data-diode egress, the ack'd relay transport,
+> the OT inputs (`snmptrap_in`, `modbus_in`), file-content hashing (`file_hash`), fleet management — are **Apex** (paid, and included at no charge with a licensed
 > logrok deployment). Budget for a licence when scoping a control to them; see
 > [LICENSING.md](../LICENSING.md) for the full Core/Apex split.
 

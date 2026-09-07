@@ -24,7 +24,7 @@ spool and replayed when it recovers — so an outage (or an air-gapped window) d
 
 ## Requirements
 
-- A host running **Windows, Linux, or macOS** — including ARM (Raspberry Pi / SBC gateways) on Linux and
+- A host running **Windows, Linux, macOS, or one of the extended platforms** (Solaris, FreeBSD, OpenBSD, NetBSD, AIX — see the platform table) — including ARM (Raspberry Pi / SBC gateways) on Linux and
   Apple Silicon on macOS.
 - An aggregator that accepts syslog over TCP (TLS recommended), reachable at a `host:port` you control.
 
@@ -159,7 +159,8 @@ see which one your target sits in.
 |---|---|
 | `linux/amd64` | **Native.** The full test suite, race detector, end-to-end tests against real receivers, and the performance gate all run here on every change. The most heavily exercised target by a wide margin. |
 | `windows/amd64` | **Real hardware.** Full Windows suite plus the Event Log / ETW / WMI readers and durability tests, run on a real Windows machine in the release gate. |
-| `darwin/amd64`, `darwin/arm64` | **Real hardware.** Full macOS suite including the unified-log reader, run on a real Mac in the release gate. |
+| `darwin/amd64` | **Real hardware.** Full macOS suite including the unified-log reader, run on a real Mac in the release gate. |
+| `darwin/arm64` | **Cross-compiled.** Builds and links; not executed on that architecture. Our macOS test machine is Intel, so the suite that runs on it exercises the amd64 binary — Apple Silicon is covered by the same source, but no arm64 build has been run. We would rather say so than round it up to its sibling's result. |
 | `solaris/amd64` | **Real hardware.** Full suite on Solaris 11.4. |
 | `freebsd/amd64` | **Real hardware.** Full suite on FreeBSD 15.1. Covers pfSense / OPNsense / TrueNAS-class appliances. |
 | `openbsd/amd64` | **Real hardware.** Full suite on OpenBSD 7.9. |
@@ -168,7 +169,7 @@ see which one your target sits in.
 | `linux/riscv64` | **Emulated.** Same pipeline run. RISC-V SBCs and edge boxes. |
 | `linux/mipsle` (softfloat) | **Emulated.** Same pipeline run. MIPS little-endian routers and gateways; built softfloat so FPU-less chips run it. |
 | `windows/arm64` | **Cross-compiled.** Builds and links; not executed on that architecture. Its amd64 sibling is verified on real hardware. |
-| `freebsd/arm64` | **Emulated.** The binary runs the full pipeline — file tail → disk spool → RFC 5424 syslog over TCP — inside an emulated machine booting a real FreeBSD arm64 kernel. Note this is a stronger claim than the Linux emulated rows: there the host kernel serves the syscalls, here the operating system is genuinely FreeBSD. The hardware is still emulated. Its amd64 sibling is verified on the real OS. |
+| `freebsd/arm64` | **Emulated.** The binary runs the full pipeline — file tail → disk spool → RFC 5424 syslog over TCP — inside an emulated machine booting a real FreeBSD arm64 kernel, in the release gate and again nightly. Note this is a stronger claim than the Linux emulated rows: there the host kernel serves the syscalls, here the operating system is genuinely FreeBSD. The hardware is still emulated. Its amd64 sibling is verified on the real OS. |
 | `aix/ppc64` | **Cross-compiled.** Builds and links; not executed. If you run an AIX estate we would like to change that — see below. |
 
 **Reading the tiers honestly:**
@@ -221,9 +222,9 @@ All options, with defaults and implemented/planned status, are in the **[Configu
 The shape: `service`, `management`, `buffer`, then lists of `inputs` / `processors` / `outputs` where each entry
 has a `type` plus that module's own keys. Today's modules:
 
-- **Inputs:** `windows_eventlog`, `etw` (Windows ETW real-time trace sessions — kernel/analytic telemetry that never reaches the Event Log; see [Windows ETW — telemetry beyond the Event Log](#windows-etw--telemetry-beyond-the-event-log)), `wmi` (Windows WMI/CIM system inventory & state via WQL polling; see [Windows WMI — system inventory & state via WQL](#windows-wmi--system-inventory--state-via-wql)), `filetail` (globs, rotation, multiline, restart-resume, plus `format: cri|docker|auto` for Kubernetes container-log parsing — see [Kubernetes](#kubernetes)), `journald` (Linux), `linux_audit` (Linux kernel audit trail — process executions, file-access watches, logins; see [Linux audit trail — kernel-level security events](#linux-audit-trail--kernel-level-security-events)), `oslog` (macOS), `syslog_in`, `relay_in` (ack'd-transport receiver), `http_in` (HTTP(S) POST ingress — webhooks/IoT/edge), `mqtt_in` (MQTT 3.1.1 subscriber — IoT/edge brokers), `snmptrap_in` (SNMP v1/v2c/v3 trap + inform receiver — OT/network devices), `modbus_in` (Modbus TCP **and RTU/serial** register polling that emits OT *events* — changes, threshold crossings, device outages — see [Modbus — OT events, not register streams](#modbus--ot-events-not-register-streams))
-- **Processors:** `add_fields`, `filter`, `expr` (conditional set/drop/rename), `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → fields), `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (edge volume reduction incl. a hard daily budget — see [Reduce volume at the edge](#reduce-volume-at-the-edge))
-- **Outputs:** `syslog` (TLS / mTLS, UDP diode mode, JSON encoding), `snare` (Snare / "MSWinEventLog" tab-delimited format over syslog — drop-in interop for a SIEM configured for a legacy NXLog/Snare feed; shares the syslog transport), `relay` (ack'd reliable transport, agent→agent), `otlp` (OpenTelemetry Protocol, gRPC or HTTP), `hec` (Splunk HTTP Event Collector — response-mode or opt-in indexer-ack commit; see [Forwarding to Splunk (HEC)](#forwarding-to-splunk-hec)), `loki` (Grafana Loki push API — stream labels + structured metadata; see [Forwarding to Grafana Loki](#forwarding-to-grafana-loki))
+- **Inputs:** `windows_eventlog`, `etw` (Windows ETW real-time trace sessions — kernel/analytic telemetry that never reaches the Event Log; see [Windows ETW — telemetry beyond the Event Log](#windows-etw--telemetry-beyond-the-event-log)), `wmi` (Windows WMI/CIM system inventory & state via WQL polling; see [Windows WMI — system inventory & state via WQL](#windows-wmi--system-inventory--state-via-wql)), `filetail` (globs, rotation, multiline, restart-resume, plus `format: cri|docker|auto` for Kubernetes container-log parsing — see [Kubernetes](#kubernetes)), `journald` (Linux), `linux_audit` (Linux kernel audit trail — process executions, file-access watches, logins; see [Linux audit trail — kernel-level security events](#linux-audit-trail--kernel-level-security-events)), `bsm_audit` (Solaris BSM audit trail — the same evidence on the extended-platform tier, decoded with the OS's own `praudit`; see [Solaris BSM audit trail](#solaris-bsm-audit-trail--the-same-evidence-on-solaris)), `oslog` (macOS), `syslog_in`, `relay_in` (ack'd-transport receiver), `http_in` (HTTP(S) POST ingress — webhooks/IoT/edge), `mqtt_in` (MQTT 3.1.1 subscriber — IoT/edge brokers), `snmptrap_in` (SNMP v1/v2c/v3 trap + inform receiver — OT/network devices), `modbus_in` (Modbus TCP **and RTU/serial** register polling that emits OT *events* — changes, threshold crossings, device outages — see [Modbus — OT events, not register streams](#modbus--ot-events-not-register-streams))
+- **Processors:** `add_fields`, `filter`, `expr` (conditional set/drop/rename), `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → fields), `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (edge volume reduction incl. a hard daily budget — see [Reduce volume at the edge](#reduce-volume-at-the-edge)), `adaptive_sample` (load-adaptive sampling rate), `redact` (mask / hash / drop sensitive values at the source), `lookup` (join events against a local asset table), `file_hash` (attach a changed file's digest to the event that reported the change)
+- **Outputs:** `syslog` (TLS / mTLS, UDP diode mode, JSON encoding), `snare` (Snare / "MSWinEventLog" tab-delimited format over syslog — drop-in interop for a SIEM configured for a legacy NXLog/Snare feed; shares the syslog transport), `relay` (ack'd reliable transport, agent→agent), `otlp` (OpenTelemetry Protocol, gRPC or HTTP), `hec` (Splunk HTTP Event Collector — response-mode or opt-in indexer-ack commit; see [Forwarding to Splunk (HEC)](#forwarding-to-splunk-hec)), `loki` (Grafana Loki push API — stream labels + structured metadata; see [Forwarding to Grafana Loki](#forwarding-to-grafana-loki)), `kafka` (Apache Kafka / Kafka-compatible brokers, per-record acks; see [Forwarding to Kafka](#forwarding-to-kafka)), `s3` (time-partitioned NDJSON to S3 / S3-compatible stores; see [Forwarding to S3 object storage](#forwarding-to-s3-object-storage)), `sentinel` (Microsoft Sentinel Logs Ingestion API; see [Forwarding to Microsoft Sentinel](#forwarding-to-microsoft-sentinel)), `xsiam` (Cortex XSIAM HTTP log collector; see [Forwarding to Cortex XSIAM](#forwarding-to-cortex-xsiam))
 - **Control-plane channel** (`management`): the central-management connection also supports mTLS, mirroring the syslog output. Set `management.tls.cert_file`/`tls.key_file` to present a client certificate to the control plane, and `management.tls.ca_file` to pin the control-plane server's CA instead of relying on system roots. `tls.mode: static` uses operator-provided cert files; `tls.mode: enrolled` is now available — the agent obtains and auto-renews a control-plane-issued client cert (no manual cert files needed), with the private key generated locally and never leaving the host. Revocation is handled by the control plane — enrolled certs are short-lived and simply stop being renewed — which requires a control plane implementing the agent-cert lifecycle (the logrok control plane ships it: per-tenant CA, short-lived auto-renewed client certs, instant revocation; any compatible implementation can provide the same endpoints). The enrolled cert can also be presented on the **data plane** via `cert_source: enrolled` on `syslog`/`relay` outputs — see [Securing the link](#securing-the-link-tls--mtls) below.
 
 ## Deployment scenarios
@@ -474,6 +475,91 @@ Operator notes:
 - **Restart semantics (v1).** File mode keeps no offset checkpoint: a restart resumes from the end of the
   log (`read_from: beginning` re-reads the whole file). Details and the full option table in the
   [Configuration Reference](CONFIGURATION.md#linux_audit--linux-only)'s `linux_audit` section.
+
+### Solaris BSM audit trail — the same evidence on Solaris
+
+`bsm_audit` collects the Solaris BSM audit trail: logins, privilege use, process execution and — with the
+right audit flags — file changes. Like `linux_audit`, every record arrives with the **actor**: the audit user,
+the real user, the process and the session.
+
+```yaml
+inputs:
+  - type: bsm_audit
+    # dir: /var/audit
+    # read_from: end        # end (default) | beginning
+```
+
+It decodes the trail with **the operating system's own `praudit`**, run as a subprocess. The trail is a binary
+token format, and a hand-written parser that got one token layout subtly wrong would produce plausible *wrong*
+values rather than an error — not a trade worth making for evidence.
+
+**Two things are yours to set up, and the second is the one people miss:**
+
+1. **The agent must be able to read `/var/audit`** — it is `root:root` mode `0640`.
+2. **The audit flags decide what is in the trail.** File-change records need the file classes enabled via
+   `auditconfig`, exactly as `linux_audit` needs auditd rules loaded. **With no relevant flags there is
+   simply no traffic**, and an empty trail looks exactly like a broken input — check the flags first.
+
+**On restart it resumes per `read_from`, keeping no byte offset.** That is a property of the format rather
+than a shortcut: `praudit` cannot be started mid-record, so only the start of a file and its end are safe
+resume points. Anything missed is still in the trail file and can be replayed with `read_from: beginning`.
+
+### File-integrity events (FIM) — what the agent does, and what it deliberately doesn't
+
+If you are looking for **File Integrity Monitoring**, read this section before deciding whether the agent
+covers what you need. The honest answer is *half of it, on purpose*.
+
+**What the agent does.** It forwards file-change **events** — who touched which path, when, and how — as
+ordinary structured events, with the same delivery guarantees as everything else: store-and-forward across
+an outage, tamper-evident spool, at-least-once delivery. No new input module: the OS already produces these
+records and the agent already reads the channels they arrive on. The optional `file_hash` processor (see the
+[Configuration Reference](CONFIGURATION.md)) adds the content half — the digest of the changed file, attached to
+the event that reported the change. Start from
+[`configs/file-integrity.example.yaml`](../configs/file-integrity.example.yaml).
+
+**What it does not do.** It does not baseline your files, compare them against a known-good state, or
+decide that a change was unauthorised (it can hash the changed file for you — `file_hash` — so that comparison
+can happen downstream). That is *detection*, and it belongs where your rules and
+your query engine are — downstream, in the platform. The agent's job is to make sure the evidence arrives
+and keeps arriving. For PCI DSS 11.5 this makes the agent the feedstock for a change-detection mechanism,
+not the mechanism itself — see [PCI DSS mapping](compliance/pci-dss.md).
+
+**Linux — auditd watch rules, via `linux_audit`.** Load watches for the paths that matter, then let the
+agent forward what they produce:
+```
+# /etc/audit/rules.d/fim.rules  →  augenrules --load
+-w /etc/passwd          -p wa -k fim_identity
+-w /etc/sudoers         -p wa -k fim_privilege
+-w /etc/ssh/sshd_config -p wa -k fim_remote_access
+-w /etc/cron.d/         -p wa -k fim_persistence
+```
+`-p wa` watches writes and attribute changes. **The rules are yours** — the agent reads the audit stream and
+never loads or modifies rules (as above).
+
+Why the audit trail rather than a filesystem watcher: audit records carry the **actor** — uid, auid, pid,
+the command line. *"Someone changed `/etc/sudoers`"* is a notification; *"uid 1004, via sudo, changed
+`/etc/sudoers` at 02:14"* is evidence. A plain file-change watch cannot tell you the second one, which is
+why the agent does not ship one.
+
+**Windows, with Sysmon.** Sysmon writes file and registry events to a normal Event Log channel that
+`windows_eventlog` reads: **11** FileCreate, **23/26** FileDelete, **12–14** RegistryEvent (the Windows
+analogue of a config-file change, and the one most setups forget), **2** FileCreateTime changed
+(timestomping — a tampering signal in itself). Filter in the Sysmon XML config first; it is much the
+cheapest place to cut volume. See [`configs/sysmon.example.yaml`](../configs/sysmon.example.yaml).
+
+**Windows, without Sysmon.** Native object-access auditing produces **4663** (object accessed), **4656**
+(handle requested) and **4670** (permissions changed) on the `Security` channel. Two steps, and the second
+is the one people miss:
+```
+auditpol /set /subcategory:"File System" /success:enable /failure:enable
+```
+…and then put a **SACL** on each path you want audited (Properties → Security → Advanced → Auditing).
+**Without a SACL the policy produces nothing, and it fails silently** — the channel is simply empty, which
+reads exactly like "no changes have happened". Scope the SACLs narrowly rather than the query: 4663 on a
+broad SACL is one of the highest-rate events Windows produces.
+
+**macOS is not covered.** There is no file-change input for macOS, and `oslog` is not a substitute. If you
+need it, say so — it is a demand-gated decision, not an oversight.
 
 ### Linux gateway — collect syslog from devices that can't run an agent
 Constrained devices (appliances, IoT/OT sensors, ESP-class boards) **can't run the agent** — point them at a
@@ -979,7 +1065,7 @@ spools — loss-free end to end by configuration.
 > `logrok_agent_events_dropped_total` and logged at Warn (`relay: dropping oversized batch that cannot fit one
 > frame …`, naming the byte size and cap). This is deliberate: a batch that can never be sent is disposed of
 > rather than retried forever, which would jam the spool head and stall all delivery behind it. If you see this
-> warning, set `compress: true` and/or add a `trim` processor upstream to cap oversized fields (a single event
+> warning, set `compress: true` and/or add a `trim_fields` processor upstream to cap oversized fields (a single event
 > larger than ~16 MiB cannot be relayed and must be trimmed at the source).
 
 ### Fan out to multiple destinations
@@ -1011,7 +1097,7 @@ to the SIEM, everything to the data lake:
 ```yaml
 outputs:
   - { type: syslog, name: siem, endpoint: "siem.example:6514",
-      when: 'severity <= 3 or fields.app == "auth"' }
+      when: 'severity <= 3 || fields.app == "auth"' }
   - { type: s3, name: lake, bucket: security-lake-raw, region: eu-west-1 }   # no when: receives everything
 ```
 
@@ -1477,6 +1563,75 @@ Three behaviours worth knowing:
   table that is briefly unreadable (mid-rewrite) keeps the copy in memory. A table that cannot be read at
   *startup* is a configuration error, because a lookup enriching nothing should fail loudly.
 
+## Network appliances (pfSense, OPNsense) and FreeBSD
+
+pfSense and OPNsense are FreeBSD underneath, and firewall/VPN logs are among the highest-value security
+telemetry on a network — so the agent runs on the appliance itself rather than you pointing its syslog at
+something and hoping. The documentation bundle ships `deploy/freebsd/logrok-universal-agent.rc`, an `rc.d` service with the same
+posture as the systemd unit: supervised restart, unprivileged run-as user, and a private state directory.
+It is verified on real FreeBSD — start, status, stop, and restart-after-crash.
+
+```sh
+# 1. the binary
+fetch -o /usr/local/bin/logrok-universal-agent <freebsd-amd64 download>
+chmod 0555 /usr/local/bin/logrok-universal-agent
+
+# 2. an unprivileged user for it
+pw useradd logrok -d /var/db/logrok-agent -s /usr/sbin/nologin -c "logrok agent"
+
+# 3. config
+mkdir -p /usr/local/etc/logrok-agent
+# put your agent.yaml at /usr/local/etc/logrok-agent/agent.yaml
+
+# 4. the service
+install -m 0555 logrok-universal-agent.rc /usr/local/etc/rc.d/logrok_agent
+sysrc logrok_agent_enable=YES
+service logrok_agent start
+service logrok_agent status
+```
+
+**Settings** (`sysrc`, or `/etc/rc.conf`):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `logrok_agent_enable` | `NO` | `YES` to start at boot |
+| `logrok_agent_config` | `/usr/local/etc/logrok-agent/agent.yaml` | |
+| `logrok_agent_runas` | `logrok` | the user the agent runs as |
+| `logrok_agent_statedir` | `/var/db/logrok-agent` | spool + state. **Move this** if your appliance has a small or read-mostly root filesystem — pfSense and OPNsense typically do |
+| `logrok_agent_logfile` | `/var/log/logrok-agent.log` | the agent's own output |
+| `logrok_agent_flags` | *(empty)* | extra flags |
+
+**Licensing on appliances.** FreeBSD is an **extended platform**, which is an Apex capability — as is the
+disk spool. Running unlicensed on pfSense or OPNsense therefore degrades to Core: the agent keeps forwarding,
+but the spool becomes **drain-only**, so it delivers what it already holds and buffers nothing new. On an
+appliance behind an intermittent WAN link that is exactly the capability you wanted, so plan the entitlement
+in rather than discovering it during an outage. The startup log says so explicitly.
+
+**Two things worth knowing before you deploy:**
+
+**Reading root-owned logs.** The agent runs unprivileged, so it cannot read every file under `/var/log` by
+default. Grant access to the specific files you collect via group membership — **do not set
+`logrok_agent_runas=root`**, which hands the whole appliance's privileges to a log forwarder.
+
+**Firmware upgrades wipe non-persistent paths** on some appliances. Keep `logrok_agent_statedir` on a
+persistent volume, and expect to reinstall the binary and rc script after a major firmware update — the
+config and spool survive if they live somewhere the upgrade does not touch.
+
+## Proxmox VE, VyOS and other Debian-based appliances
+
+These are Debian underneath, so the `.deb` package installs and runs as it does on any Debian host —
+systemd unit, `logrok-agent` user, config at `/etc/logrok-agent/agent.yaml`, spool at
+`/var/lib/logrok-agent`. Nothing appliance-specific is needed:
+
+```sh
+dpkg -i logrok-universal-agent_<version>_amd64.deb
+systemctl enable --now logrok-agent
+```
+
+On Proxmox the interesting sources are `journald` (cluster, storage and VM lifecycle events) and
+`filetail` over `/var/log/pve/tasks`. On VyOS, `syslog_in` also lets the router forward its own
+config-change and firewall logs to a locally running agent that buffers them across a WAN outage.
+
 ## Kubernetes
 
 Deploy the agent as a node-level container-log collector and/or a syslog gateway via Helm:
@@ -1501,6 +1656,149 @@ helm install logrok-agent oci://ghcr.io/logiqum/charts/logrok-agent \
 - Managed/enrolled mode via the chart is planned (not yet supported); enroll manually for now (mount a hand-written `agent.yaml` with the `management:` block). Setting `--set management.enabled=true` fails fast at template time.
 
 Under the hood the collector is just `filetail` with `format: cri` over `/var/log/pods/*/*/*.log` — so you can also run it without Helm (any DaemonSet or host install) by pointing a `filetail` input at the node's pod-log root with `format: cri|docker|auto` and `add_k8s_metadata: true`. See `docs/CONFIGURATION.md` for the full option list.
+
+## FIPS 140-3
+
+**Every binary we ship runs in FIPS 140-3 mode.** Not a variant, not a paid tier, not something to request
+— every platform, every download. If you don't need it, nothing changes for you; if you do, it is already
+there.
+
+It costs you nothing measurable: 36 KB of binary, no throughput difference, about 2 ms of extra startup.
+
+**Check the binary you actually hold:**
+
+```
+$ logrok-universal-agent -version
+1.3.0
+fips140: enabled (Go Cryptographic Module v1.0.0, CMVP certificate #5247)
+```
+
+The line is read from the module at runtime, not printed from a build note, so it reflects what the binary
+is doing rather than what a build script intended. It is absent only from the non-FIPS build described
+below.
+
+**For a fleet**, `/metrics` carries the same fact as a gauge, exported as `0` or `1` in *every* build:
+
+```
+logrok_agent_fips140_enabled 1
+```
+
+It is deliberately never omitted when off — an absent series and a failed scrape look identical to a
+monitoring system, so a rule like "alert if any agent in this estate is not in FIPS mode" would be silent
+exactly when it mattered.
+
+### What this does and does not mean
+
+Read this before putting the agent in a compliance document.
+
+**What is true and verifiable:** the binary is built against the **Go Cryptographic Module v1.0.0**, which
+holds **CMVP certificate #5247** (CAVP A6650), and that module is operating in FIPS 140-3 mode.
+
+**What is not claimed:** that the agent itself is FIPS-certified, or that deploying it makes a system
+compliant. The validated artifact is the *module*, not this product. Using a validated module is one input
+to a compliance argument, not the argument — your assessor decides what satisfies your obligations, and
+the Go project is explicit that it offers no guarantee about which regulatory requirements this mode does
+or does not satisfy.
+
+### Turning FIPS off for a receiver that cannot do it (`service.fips`)
+
+Almost every receiver works with FIPS on — we verify syslog-ng (including mTLS), Kafka, Loki, S3, MQTT,
+the ack'd relay and the control plane end to end on every release. **Splunk HEC is the exception**, and
+the reason generalises, so it is worth understanding before you hit it.
+
+FIPS 140-3 allows TLS 1.2 **only with Extended Master Secret** (RFC 7627), which binds the session key to
+the handshake transcript. TLS 1.3 needs no EMS — its key schedule already does that — so a FIPS agent can
+talk TLS 1.3 to anything. The problem is a receiver offering **neither**: Splunk 9.4's HEC endpoint caps
+at TLS 1.2 and does not implement EMS, so there is no handshake both sides accept and delivery cannot
+start at all.
+
+**What you see if you hit it.** The agent starts, loads its config and collects normally. Only *delivery*
+fails: the output is marked unavailable, events **buffer to the disk spool** — nothing is lost — and the
+agent retries, logging the cause each time. The symptom is "the agent is healthy but nothing arrives",
+with the spool growing. The error names this section.
+
+**Preferred fix: enable TLS 1.3 on the receiver.** It needs no EMS and keeps the whole deployment inside
+the approved boundary.
+
+**If you cannot**, turn FIPS off for that agent:
+
+```yaml
+service:
+  fips: off        # on | off — unset runs the binary as built (the shipped build is FIPS)
+```
+
+The agent applies this at startup by re-executing itself once with the right runtime setting. The
+**process ID does not change**, so a service manager sees one continuous process and supervision is
+unaffected. Verified on real FreeBSD under `daemon(8)` with restart-on-exit enabled: the agent kept the
+same PID, the supervisor did not treat the re-exec as a crash, and `service ... stop` still worked. It takes effect at startup only: changing it needs a
+restart, not a config reload.
+
+**On Windows** there is no equivalent of the Unix `execve`, and a service that re-spawns itself is treated
+as a failed service. There, set `GODEBUG=fips140=off` in the service's environment yourself — the installer
+does not write it: add it to the agent service's `Environment` registry value (a `REG_MULTI_SZ` under
+`HKLM\SYSTEM\CurrentControlSet\Services\<service name>`) and restart the service. A `service.fips` value that disagrees with the running posture is reported at startup rather
+than silently ignored.
+
+**The narrower alternative**, if you want FIPS everywhere else and only need to reach one non-EMS
+receiver: leave `fips: on` and set `GODEBUG=fips140ems=0` in the service environment. That permits TLS 1.2
+without EMS **and those connections are then NOT FIPS-approved** — so the agent says so, in `-version`, on
+`/metrics` (`logrok_agent_fips140_ems_relaxed 1`) and in its heartbeat. It is process-wide: it relaxes
+every connection, not just the one that needed it. `fips_mode: required` refuses to start in that state,
+deliberately.
+
+### Requiring FIPS on a host (`fips_mode`)
+
+The FIPS and standard builds are identical in every observable way except the cryptographic module. That
+means an operator has no way to tell, from the agent's behaviour, that the artifact which actually reached
+a regulated host is the FIPS one — until an audit asks.
+
+`service.fips_mode` turns that assumption into a checked fact:
+
+```yaml
+service:
+  fips_mode: required     # auto (default) | required | disabled
+```
+
+- **`required`** — the agent refuses to start unless it is running in FIPS 140-3 mode.
+- **`disabled`** — the agent refuses to start if it *is*. Not symmetry for its own sake: a FIPS build
+  negotiates only approved cipher suites, so an estate that must reach a legacy receiver wants to find out
+  it received the wrong build at startup, not at the first delivery failure.
+- **`auto`** — no opinion (the default).
+
+**It is a check, not a switch.** FIPS mode is selected when the binary is *built* and locked when the
+process starts; no configuration can enable or disable it. A mismatch therefore fails startup and the error
+says what to do — deploy the other build — because "edit the config" is the natural first instinct here and
+it cannot work.
+
+### When a FIPS build cannot connect
+
+This is the one thing to know about FIPS being the default. A FIPS build negotiates only FIPS-approved
+algorithms, so a receiver that offers **only** ChaCha20-Poly1305, or only a CBC-SHA cipher suite — common
+on older aggregators, which is to say the systems people migrate *away* from — will refuse the handshake.
+TLS reports nothing more useful than:
+
+```
+remote error: tls: handshake failure
+```
+
+That message never mentions FIPS, and it typically appears at the worst moment: the first run against the
+legacy system you are migrating away from. So in a FIPS build the agent appends the explanation to that
+error itself, naming the cause and the two ways out (enable an approved suite — AES-GCM over TLS 1.2 or
+1.3 — on the receiver, or run the non-FIPS build). Errors that are *not* cipher-suite problems, such as a
+bad hostname or a refused connection, are left untouched.
+
+**The non-FIPS build.** If you must talk to a receiver that cannot offer an approved suite, ask us for the
+standard-crypto build. It is the same agent — same version, same features, same support — with the
+cryptographic module unpinned. Set `service.fips_mode: disabled` on those hosts so deploying the wrong
+artifact there fails at startup instead of at the first delivery.
+
+### Known limitation — SNMPv3 privacy
+
+`snmptrap_in` decrypts SNMPv3 USM privacy using **CFB mode**, which the specification requires (RFC 3826)
+and which is not among the FIPS-approved modes. In a FIPS build the module runs in FIPS 140-3 mode while
+still permitting that operation, so **SNMPv3 traps keep working** — but if your obligation is that *only*
+approved algorithms are used anywhere in the process, do not enable SNMPv3 privacy on a FIPS deployment.
+SNMPv1/v2c and SNMPv3 without privacy are unaffected, as is every other input and output.
 
 ## Securing the link (TLS / mTLS)
 
@@ -1627,11 +1925,11 @@ The agent has a free **Core** tier (file tail, syslog/journald/HTTP inputs, pars
 syslog output, metrics — no license needed, at any scale) and a paid **Apex** tier for
 everything else. The line: **Core collects from the host and forwards one open standard —
 RFC 5424 syslog over TCP/TLS — to one destination.** Anything that reads a privileged or
-proprietary OS subsystem (Windows Event Log, ETW, WMI, `linux_audit`, `oslog`), speaks a
+proprietary OS subsystem (Windows Event Log, ETW, WMI, `linux_audit`, `oslog`, `bsm_audit`), speaks a
 named vendor or platform API (`hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`,
 `snare`), or adds fleet-scale machinery (disk spool, fleet management, edge reduction,
 enrolled mTLS, relay, Kubernetes container logs, UDP/data-diode output, fan-out, extended
-OS platforms) is Apex. TLS is never gated. Full model, license-file format, and state
+OS platforms, OT ingest — `snmptrap_in`, `modbus_in` — and file-content hashing, `file_hash`) is Apex. TLS is never gated. Full model, license-file format, and state
 machine: [LICENSING.md](LICENSING.md).
 
 > **Upgrading from 1.1.x or earlier — read this.** Fifteen modules are Apex but were not
@@ -1723,7 +2021,7 @@ logrok is one possible destination. When forwarding into a logrok deployment:
 
 ## Maturity & what's coming
 
-**Available now — inputs:** Windows Event Log (`windows_eventlog` — verified end-to-end on real Windows
+**Available now — inputs:** Solaris BSM audit trail (`bsm_audit` — logins, privilege use and other audited actions with the acting user attached, decoded via the OS's own `praudit`; runtime-verified on real Solaris 11.4), Windows Event Log (`windows_eventlog` — verified end-to-end on real Windows
 hardware, incl. Sysmon; XPath filtering, saved `.evtx`/`.evt` file reading), Windows ETW real-time trace
 sessions (`etw` — manifest-provider TDH decoding; runtime-verified on real Windows hardware), Windows WMI/CIM
 (`wmi` — system inventory & state via WQL polling; compile+unit-verified, runtime-validated on Windows
@@ -1747,7 +2045,10 @@ sampling toward a target, with the effective rate stamped so counts survive) —
 wire, with a salted-hash mode that keeps values correlatable without retaining them — see
 [Redacting sensitive values](#redacting-sensitive-values-before-they-leave-the-host). `lookup` enriches
 events from a local CSV/JSON table (asset inventory, CMDB export) so hostnames arrive as owner/environment/site
-facts — see [Enriching events from an asset table](#enriching-events-from-an-asset-table).
+facts — see [Enriching events from an asset table](#enriching-events-from-an-asset-table). `file_hash` attaches
+the digest of a changed file to the event that reported the change, so the platform can compare content while
+the event still carries the user responsible — see
+[File-integrity events](#file-integrity-events-fim--what-the-agent-does-and-what-it-deliberately-doesnt).
 
 **Outputs:** `syslog` (RFC 5424 with TLS/mTLS over TCP, UDP diode mode, JSON encoding), `snare` (the legacy
 Snare/"MSWinEventLog" format for a SIEM expecting an NXLog/Snare feed), `relay` (ack'd reliable agent→agent
@@ -1787,7 +2088,7 @@ Developer-ID-signed), a distroless container image + Helm chart for Kubernetes (
 [Kubernetes](#kubernetes)), and static binaries for Linux, Windows, and macOS on Intel and ARM.
 
 **Planned:** GPO/Intune deployment guidance;
-a macOS Endpoint Security input; OT/SCADA inputs (SNMP traps first).
+a macOS Endpoint Security input.
 
 ## Uninstall
 

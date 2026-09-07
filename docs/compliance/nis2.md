@@ -13,7 +13,7 @@ collection:
 | Obligation | What it asks | Agent today | Notes / whose job |
 |---|---|---|---|
 | **Art. 21(2)** risk-management measures | Incident handling; security monitoring; policies on cryptography; supply-chain security | ✅ The collection layer: Windows (incl. Security channel + Sysmon), Linux journald, file, syslog relay — delivered with TLS/mTLS in transit | Risk analysis, policies, response = organizational |
-| **Art. 23** incident reporting | **24h early warning → 72h notification → 1-month final report** for significant incidents | ◐ You can't reconstruct an incident timeline in 24h from logs that never left the affected boxes. The agent's prompt off-host forwarding + **no-gap store-and-forward** is what makes the 24/72h clock survivable | Detection, classification, reporting = SOC/platform |
+| **Art. 23** incident reporting | **24h early warning → 72h notification → 1-month final report** for significant incidents | ◐ You can't reconstruct an incident timeline in 24h from logs that never left the affected boxes. The agent's prompt off-host forwarding + **no-gap store-and-forward** (bounded spool; `when_full: block` for zero-drop backpressure) is what makes the 24/72h clock survivable | Detection, classification, reporting = SOC/platform |
 | OT scope (new vs NIS1) | Manufacturing/OT entities are now in scope | ✅ The OT constraint set is the agent's home turf: air-gapped operation, diode-mode UDP egress, static binary for change-controlled hosts | See [nerc-cip.md](nerc-cip.md) § "Why this agent fits OT" |
 
 **EU angle worth stating in procurement:** the agent is vendor-neutral (standard RFC 5424 syslog to any

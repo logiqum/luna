@@ -11,7 +11,7 @@ NIST SP 800-171r2 control text. *Not compliance advice — confirm scoping with 
 | **3.3.1** create & retain audit logs | System audit logs/records to enable monitoring, analysis, investigation | ✅ collects the OS-level trail (Windows Event Log incl. Security; journald; the Linux kernel audit trail via `linux_audit` — process executions, file-access watches, logins; files) and delivers it to the retention store without gaps (store-and-forward) | Retention duration = platform |
 | **3.3.2** trace to individual users | Actions traceable to unique users | ✅ passes through the OS identity fields (Windows logon events, SIDs/usernames in EventData; journald `_UID`/unit fields; `linux_audit` UID/AUID fields) as structured SD | Identity hygiene (unique accounts) = yours |
 | **3.3.3** review/update logged events | Periodically re-decide *what* you log | ◐ per-module config + XPath `query`/processors make the logged-event set explicit, reviewable, and centrally changeable (mgmt plane: config-pull — already shipped) | The review itself = yours |
-| **3.3.4** alert on audit-process failure | Alert when audit logging fails | ✅ the strongest fit: `/metrics` (`events_dropped_total`, buffer depth, `last_forward_timestamp`) + heartbeat make collection failure observable and alertable | Alert rules = monitoring stack |
+| **3.3.4** alert on audit-process failure | Alert when audit logging fails | ✅ the strongest fit: `/metrics` (`events_dropped_total`, buffer depth, `last_forward_timestamp_seconds`) + heartbeat make collection failure observable and alertable | Alert rules = monitoring stack |
 | **3.3.5** correlate review/analysis | Correlation across repositories | ◐ feedstock: structured fields, single wire format | Correlation = platform |
 | **3.3.6** reduction & report generation | On-demand analysis/reporting | ⛔ platform-side (logrok SQL) | — |
 | **3.3.7** authoritative time | Timestamps from synchronized authoritative source | ◐ preserves source timestamps as RFC 3339 **UTC**; does not sync clocks (OS/NTP) | — |
@@ -19,4 +19,8 @@ NIST SP 800-171r2 control text. *Not compliance advice — confirm scoping with 
 | **3.3.9** privileged log management | Limit audit management to privileged subset | ◐ agent runs as a service with a fixed config; config changes go through OS-privileged file access (or the authenticated mgmt plane, already shipped) | — |
 
 **Defense-context notes:** static no-call-home binary suits disconnected/classified-adjacent enclaves;
-**FIPS build mode is roadmapped** — contact us if FIPS validation is a requirement for your environment.
+**FIPS 140-3 mode is the shipped default** on every binary: cryptography comes from the Go Cryptographic Module
+v1.0.0 (CMVP certificate #5247), reported under `-version` and on `/metrics`. `service.fips_mode: required` refuses
+to start if a host is not running in FIPS mode; `service.fips: off` is the escape for a receiver that offers
+neither TLS 1.3 nor Extended Master Secret. The validated component is the module — whether that satisfies your
+assessor is their call, not a claim we make.

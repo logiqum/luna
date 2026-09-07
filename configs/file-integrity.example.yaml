@@ -1,0 +1,148 @@
+# File-integrity events — Windows + Linux → any syslog aggregator (logrok by default)
+#
+# WHAT THIS IS, AND WHAT IT IS NOT.
+#
+# This preset forwards file-change EVENTS: who touched which path, when, and how.
+# It is the collection half of what vendors sell as "FIM".
+#
+# It does NOT baseline files, hash them, diff them against a known-good state, or
+# decide that a change was unauthorized. That is detection, and it belongs in the
+# platform your events land in — which is where the rule corpus and the query
+# engine are. The agent's job is to make sure the evidence arrives, completely and
+# in order, and to keep arriving when the link is down (see `buffer` below).
+#
+# For PCI DSS 11.5 this is feedstock for a change-detection mechanism, not the
+# mechanism itself. See docs/compliance/pci-dss.md.
+#
+# ONE PREREQUISITE ON EACH PLATFORM — the agent reads the OS audit trail, it does
+# not configure it. You load the rules; the agent forwards what they produce.
+
+service:
+  mode: service
+  log_level: info
+
+buffer:
+  enabled: true
+  # File-integrity evidence is exactly the kind you cannot afford to lose during
+  # an outage — an attacker-caused gap and a network-caused gap look identical
+  # after the fact. when_full: block trades freshness for zero loss.
+  dir: /var/lib/logrok-agent/spool
+  max_bytes: 1073741824
+  when_full: block
+  flush_every: 2s
+
+inputs:
+  # ---------------------------------------------------------------------------
+  # LINUX — kernel audit trail with file watches.
+  #
+  # PREREQUISITE: load auditd watch rules for the paths you care about. The agent
+  # consumes the resulting records; it does not install rules.
+  #
+  #   auditd rules (/etc/audit/rules.d/fim.rules), then `augenrules --load`:
+  #     -w /etc/passwd        -p wa -k fim_identity
+  #     -w /etc/shadow        -p wa -k fim_identity
+  #     -w /etc/sudoers       -p wa -k fim_privilege
+  #     -w /etc/sudoers.d/    -p wa -k fim_privilege
+  #     -w /etc/ssh/sshd_config -p wa -k fim_remote_access
+  #     -w /usr/bin/          -p wa -k fim_binaries
+  #     -w /etc/cron.d/       -p wa -k fim_persistence
+  #   -p wa = watch writes and attribute changes. Add `r` only if you genuinely
+  #   need read access too — on a busy path it is a volume decision, not a free one.
+  #
+  # WHY auditd RATHER THAN A FILESYSTEM WATCHER: audit records carry the ACTOR
+  # (uid, auid, pid, comm, and the command line for the syscall). "Someone changed
+  # /etc/sudoers" is a notification; "uid 1004 via sudo changed /etc/sudoers at
+  # 02:14" is evidence. A plain inotify-style watch cannot tell you the second one.
+  - type: linux_audit
+    name: fim-linux
+    # mode: file is the default and works on any distro running auditd (read
+    # access to audit.log). mode: multicast reads the kernel netlink feed
+    # directly — no dependency on auditd's rotation settings, but it needs
+    # CAP_AUDIT_READ and misses records emitted while the agent was down.
+    # mode: file
+    # path: /var/log/audit/audit.log
+    #
+    # This input carries the WHOLE audit trail, not just the watch records. If
+    # process executions and logins belong in a different pipeline with a
+    # different volume budget, split them downstream rather than here — see the
+    # `filter` / `expr` processors in docs/CONFIGURATION.md.
+
+  # ---------------------------------------------------------------------------
+  # WINDOWS, option A — Sysmon (recommended: richer, and hashes on file creation).
+  #
+  # PREREQUISITE: Sysmon installed and configured to include the paths you watch.
+  # Filter in the Sysmon XML config FIRST — it is much the cheapest place to cut
+  # volume. See configs/sysmon.example.yaml for the full channel setup.
+  #
+  #   11    FileCreate
+  #   23/26 FileDelete
+  #   12-14 RegistryEvent (key/value create, delete, rename) — the Windows analogue
+  #         of a config-file change, and the one most FIM setups forget
+  #   2     FileCreateTime changed (timestomping — a tampering signal in itself)
+  #
+  # - type: windows_eventlog
+  #   name: fim-sysmon
+  #   channels: ["Microsoft-Windows-Sysmon/Operational"]
+  #   bookmark_path: 'C:\ProgramData\logrok-universal-agent\bookmarks'
+  #   query: "*[System[(EventID=2 or EventID=11 or EventID=12 or EventID=13 or EventID=14 or EventID=23 or EventID=26)]]"
+
+  # ---------------------------------------------------------------------------
+  # WINDOWS, option B — native object-access auditing, no third-party agent.
+  #
+  # Use when installing Sysmon is not permitted. Two PREREQUISITES, and the second
+  # is the one people miss:
+  #   1. Enable the audit policy:
+  #        auditpol /set /subcategory:"File System" /success:enable /failure:enable
+  #   2. Put a SACL on each path you want audited (Properties -> Security ->
+  #      Advanced -> Auditing). Without a SACL the policy produces NOTHING, and it
+  #      fails silently — the channel is simply empty, which reads as "no changes".
+  #
+  #   4663 An attempt was made to access an object (the write/delete record)
+  #   4656 A handle to an object was requested
+  #   4670 Permissions on an object were changed
+  #
+  # Volume warning: 4663 on a broad SACL is one of the highest-rate events Windows
+  # produces. Scope the SACLs narrowly, not the query.
+  #
+  # - type: windows_eventlog
+  #   name: fim-native
+  #   channels: [Security]
+  #   bookmark_path: 'C:\ProgramData\logrok-universal-agent\bookmarks'
+  #   query: "*[System[(EventID=4663 or EventID=4656 or EventID=4670)]]"
+
+processors:
+  # Attach the digest of the changed file, so the event carries BOTH halves of
+  # file-integrity evidence: the actor (from the audit record) and the content
+  # identity. The comparison against a known-good baseline still happens in the
+  # platform — the agent keeps no baseline and makes no judgement.
+  #
+  # `roots` is REQUIRED and is a security control, not ergonomics: the path
+  # comes out of an event, so without a bound a crafted event could ask the
+  # agent to hash any file it can read. Keep it to the trees you audit.
+  # Symlinks are resolved BEFORE the root check, so a link inside /etc cannot
+  # reach outside it.
+  #
+  # The digest describes the file when it was HASHED, not when it changed — the
+  # event arrives after the write. `file_hash_status` is always set (ok /
+  # not_found / denied / too_large / not_regular / unreadable), so a missing
+  # digest is a recorded outcome rather than a silently absent field.
+  - type: file_hash
+    path_fields: [path, TargetFilename, ObjectName]   # auditd / Sysmon / 4663
+    roots: [/etc, /usr/bin, /usr/sbin]
+    algorithm: sha256          # sha1 available to match an existing FIM baseline
+    max_size: 33554432         # 32 MiB — hashing is O(size) on the pipeline
+
+  # Tag the stream so the platform can route and retain file-integrity evidence
+  # on its own schedule — compliance retention for this is usually longer than
+  # for operational logs.
+  - type: add_fields
+    fields:
+      evidence_class: file_integrity
+
+outputs:
+  - type: syslog
+    name: aggregator
+    endpoint: "logrok.example.internal:16575"
+    protocol: tcp
+    tls: true
+    ca_file: /etc/logrok-agent/ca.pem
