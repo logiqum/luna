@@ -44,6 +44,8 @@ management:
   # tenant_slug: "default"
   # heartbeat_every: 30s
   # config_poll_every: 60s
+  # report_config: true    # heartbeat carries the running config so the fleet view can show/adopt it;
+  #                        # secrets are replaced by ${logrok:keep} before sending. false = send nothing
   # Control-plane mTLS (optional; hardens the api-key auth with a client cert).
   # tls:
   #   mode: static                       # static (BYO cert files) | enrolled (control-plane-issued + auto-renewed cert; no cert_file/key_file needed)
@@ -68,7 +70,7 @@ buffer:
   dir: 'C:\ProgramData\logrok-universal-agent\spool'   # omit → in-memory only
   max_bytes: 1073741824    # 1 GiB cap; 0 = unbounded.
   when_full: drop_oldest   # at the cap: drop_oldest (keep freshest) | drop_newest | block (back-pressure, no loss)
-  flush_every: 2s
+  flush_every: 2s          # spool drain cadence: how often a destination retries its backlog once the output is back (recovery pacing; live events ship immediately)
   # chain_key_file: /var/lib/logrok-agent/spool-chain.key   # tamper-evident chain key path; auto-resolved + auto-generated (0600) if omitted — the chain itself is always on when `dir` is set
 
 # Optional. Omit for the free Core tier (also the non-commercial / free-with-logrok path).
@@ -375,6 +377,12 @@ processors:
   #   on_missing: skip                # skip (default) | default — an inventory always trails reality
   #   # default: { owner: unassigned } # required by on_missing: default
 
+  # - type: noise_fingerprint         # Apex: enforce logrok noise decisions on the host — put it FIRST
+  #   name: logrok-noise-drop         #   (it hashes the message as received; not for snare / syslog encoding: json)
+  #   action: drop                    # drop (default) | tag | route (tag/route set logrok_noise + logrok_noise_template)
+  #   fingerprints:                   # list of sha256 hex, or map fingerprint: template-id (what logrok generates)
+  #     262af52f290b7ce1b309f5135fb2d9a1af63b6117d347f872595b024463b064a: tmpl-7f3a
+  #   keep_min_severity: 3            # default: err and worse always pass
   # - type: file_hash                 # file-integrity: attach the changed file's digest to the event
   #   path_fields: [path, TargetFilename, ObjectName]  # first non-empty wins (auditd / Sysmon / 4663)
   #   roots: [/etc, /usr/bin]         # REQUIRED, and a security control: the path comes from an EVENT,
@@ -466,6 +474,8 @@ outputs:
     name: aggregator
     # when: 'severity <= 3'  # optional routing (fan-out): only matching events reach this destination
     endpoint: "aggregator:6514"
+    # failover_endpoints: ["collector-b.example:6514"]   # tried in order when the active endpoint fails; spool only when all fail
+    # failback_every: 60s                                 # probe the primary while on a secondary; 0s = stay until it fails
     protocol: tcp            # default. 'udp' = one datagram per message (RFC 5426) for data diodes / udp() receivers; no TLS, no framing
     framing: newline         # TCP only, default. one msg per LF (logrok syslog-ng + most receivers). 'octet-counting' = RFC 6587, opt-in
     # sequence: true         # add [seq@66371 session=".." n=".."] SD — receiver-side gap detection on one-way links

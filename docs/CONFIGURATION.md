@@ -54,6 +54,23 @@ corrupting the chain, so a transient key outage is safe) — it does not decreme
 drain within a run; it ages toward zero across restarts as they're consumed. See `buffer.chain_key_file`
 below.
 
+**Delivery timing and reduction funnel (since 1.4.0):** `output_event_delay_seconds` — largest gap, in the
+most recently delivered batch, between an event's own timestamp and the moment a destination accepted it;
+how stale the newest data reaching your SIEM is (includes upstream lag and spool wait; a skewed source clock
+shows as noise). `pipeline_latency_seconds` — largest time, in that batch, from an input handing an event to
+this agent until a destination accepted it; the agent's own queueing and spool wait, independent of source
+clocks (events spooled by a pre-1.4 binary are not counted). Both have per-destination variants
+(`output_<name>_event_delay_seconds`, `output_<name>_pipeline_latency_seconds`; on `/metrics` the labelled
+families `logrok_agent_output_delivery_*`) and read 0 until the first delivery. With several destinations the
+unlabelled keys report the most recent delivery by **any** destination — not a sum and not a maximum — so use
+the per-destination variants when you fan out. `processor_<name>_dropped_total`
+— events removed by each named processor (with `events_in_total` and `events_out_total`: the per-stage
+funnel). `processor_reduction_ratio` — processor drops ÷ events in, 0–1, since start, including events that matched
+no destination's `when:` condition, which appear as `processor_routing_when_dropped_total`; spool `when_full` drops
+are excluded (loss, not reduction — they stay in `events_dropped_total`). `fips140_enabled` /
+`fips140_ems_relaxed` — 0/1 posture gauges, also in every heartbeat. The `/metrics` HELP text for each key
+carries the full description these paragraphs summarise.
+
 ## `management`
 
 Central management (a non-empty `endpoint`) and enrolled mTLS (`tls.mode: enrolled`) are **Apex** capabilities. On an
@@ -69,6 +86,7 @@ installs). Auth uses the logrok control-plane headers: `X-Api-Key` + `X-Tenant-S
 | `endpoint` value `auto` | string | — | ✅ | **discovery**: browse the local segment (mDNS/DNS-SD `_logrok-cp._tcp.local`) for a control plane instead of hard-coding a URL. Opt-in only — an agent with an endpoint written down is never re-pointed by the network. Discovery **locates, it never authenticates**: the enrollment token and TLS still prove the control plane, so a rogue advertiser only gets ignored. Finding nothing is not an error: the agent runs unmanaged for that run and says so. |
 | `enrollment_bundle` | string | `""` | ✅ | path to a signed **air-gap enrollment bundle** (identity + entitlement + optional starting config), verified offline against the embedded issuer key. Adopted once (anchored by the bundle's own id) and then inert — safe to leave the media mounted. See [Enrolling an agent with no path to the control plane](USER-GUIDE.md#enrolling-an-agent-with-no-path-to-the-control-plane-bundles). |
 | `state_path` | string | `agent-state.json` next to the config | ✅ | where enrollment credentials + applied config version persist (atomic, `0600`). Secrets live here, never in the config file |
+| `report_config` | bool | `true` | ✅ | report the running configuration to the control plane on every heartbeat (its hash always; the text when the control plane holds a different one) so the fleet view can show it and adopt it as the managed configuration. **Secrets never leave the host**: every secret value (any key whose name contains `token`, `password`, `passwd`, `secret`, `api_key`, `apikey`, `passphrase`, `private_key` or `credential`, plus `Authorization`-style keys under `headers`) is replaced by `${logrok:keep}` before the text is hashed or sent; file paths and identifiers stay readable; comments and key order survive, formatting is normalized. A configuration pulled from the control plane may carry that same marker under a secret key — the agent then keeps its current local value, and refuses the whole configuration if it has none or if the marker sits under a non-secret key (the refusal is reported on the next heartbeats as a failed apply). Multi-document YAML files are neither reported nor adoptable. `false` sends nothing. See [What the control plane can see of your configuration](USER-GUIDE.md#what-the-control-plane-can-see-of-your-configuration). |
 | `api_key` | string | `""` | ✅ | manual provisioning alternative to enrollment; sent as `X-Api-Key` (enrolled state takes precedence) |
 | `tenant_slug` | string | `""` | ✅ | sent as `X-Tenant-Slug` |
 | `heartbeat_every` | duration | `30s` | ✅ | heartbeat: agent_id, hostname, platform, version, config version, events/min, buffer depth |
@@ -99,7 +117,7 @@ Disk-backed store-and-forward — the air-gap guarantee.
 | `dir` | string | `""` | ✅ | spool directory. **Set this** to survive restarts; empty → in-memory only (lost on restart). |
 | `max_bytes` | int | `0` | ✅ | on-disk cap; `0` = unbounded. Behaviour at the cap is set by `when_full`. Honored for any positive value; a very small cap (below ~64 KiB) may transiently hold up to one ~64 KiB segment. |
 | `when_full` | string | `drop_oldest` | ✅ | `drop_oldest` (discard oldest spooled, keep freshest) \| `drop_newest` (refuse new, keep oldest) \| `block` (back-pressure the source until space frees — no loss). |
-| `flush_every` | duration | `2s` | ◐ | drain cadence |
+| `flush_every` | duration | `2s` | ✅ | how often each destination's spool drain loop wakes to move its backlog once the output is reachable again. The live path ships immediately — this paces **recovery**, not delivery. Until 1.3.1 the key was accepted and validated but not read (the loop ran at a fixed 2 s); a non-default value now takes effect |
 | `chain_key_file` | string | `""` (auto-resolved) | ✅ | overrides where the tamper-evidence chain key lives. Empty = resolved automatically (see below). |
 
 On disk: fsync'd, **CRC32-framed** NDJSON segment files (`<crc> <json>` per line, or `<crc> <mac> <json>` on a
@@ -1374,6 +1392,37 @@ its own independent disk spool, drain loop, and metrics — a dead or slow desti
 others, and each destination's backlog survives restarts on its own spool. Fan-out is a paid (Apex)
 capability; single-destination forwarding stays free (Core).
 
+#### `noise_fingerprint` ✅ — enforce logrok noise decisions at the sender — **Apex**
+
+logrok classifies log templates as noise and gives each template a fingerprint: the message with UUIDs, IPv4
+addresses, hex and decimal runs masked and whitespace collapsed, hashed. This processor computes the same
+fingerprint of every event's message and, when it is in the configured set, drops the event or marks it —
+one hash lookup per event, thousands of templates are fine. A managed or hand-written config carries the
+set (logrok filling it in automatically follows on its side). By default events of severity err and worse
+always pass (the same line logrok draws at ingest). **Place it first in the processors list**: it hashes
+the message as received, and anything that rewrites the message (`redact`, `trim_fields`, the parsers)
+would change the fingerprint. **It cannot match on a `snare` destination or a `syslog` destination with
+`encoding: json`** — those rewrite the message before it is sent, so logrok fingerprints different bytes;
+the agent warns at startup when it sees that combination. A message truncated on the way (UDP datagram
+size, a receiver's message-size cap) cannot match either.
+
+| Option | Type | Default | Notes |
+|---|---|---|---|
+| `fingerprints` | list or map | `[]` | sha256 hex fingerprints — a list of strings, or a map `fingerprint: template id` (what logrok generates; the id is what a marked event carries). Lowercase hex only; an empty set is a no-op |
+| `action` | `drop` \| `tag` \| `route` | `drop` | `drop` removes the event on the host; `tag` and `route` both keep it and set `logrok_noise=<action>` and `logrok_noise_template=<id>` (the fingerprint when no id is known), which ride into logrok as structured data. On the agent the two are identical — the value only tells logrok which decision to apply at ingest |
+| `keep_min_severity` | int | `3` | Events with `Severity <= N` are neither dropped nor marked (default: err and worse) |
+| `keep_if` | string | `""` | `expr`-grammar condition; matching events pass untouched |
+
+```yaml
+- type: noise_fingerprint
+  name: logrok-noise-drop        # the processor label: logrok_agent_processor_dropped_total{processor="logrok-noise-drop"}
+  action: drop                   # default
+  fingerprints:
+    262af52f290b7ce1b309f5135fb2d9a1af63b6117d347f872595b024463b064a: tmpl-7f3a   # "wakeup dt=<*>"
+    9038a40dd133bf7037606098aea90b257ed2bcb8d8b8138cc735e96d14490bbe: tmpl-c1d2   # "state update"
+  keep_min_severity: 3           # default
+```
+
 ### Fan-out (multiple outputs)
 
 ```yaml
@@ -1438,6 +1487,8 @@ structured data — or as a JSON message body with `encoding: json`.
 |---|---|---|---|
 | `endpoint` | string | *(required)* | `host:port` of the aggregator (logrok syslog-ng by default) |
 | `protocol` | string | `tcp` | `tcp` or `udp`. UDP sends **one datagram per message** (RFC 5426, no framing) — required for **hardware data diodes** (Waterfall/Owl pass UDP only) and plain `udp()` receivers. UDP is fire-and-forget: no delivery guarantee on the wire; pair with `sequence` for receiver-side gap detection **UDP diode mode is Apex**; RFC 5424 over TCP/TLS is Core. |
+| `failover_endpoints` | list of `host:port` | *(none)* | **Core** (free on `syslog`; on `snare` it follows that output's Apex tier). Tried **in order** when the active endpoint fails to connect or write — inside the same delivery attempt, so the spool is the last resort, not the first. The primary `endpoint` stays first. Entries must be unique and non-empty; not supported with `protocol: udp` (no failure signal). TLS settings apply to every endpoint; with `server_name` set, every endpoint must present that name. A failed write mid-batch resends the whole batch on the next endpoint (the same bounded-duplicate class as a re-spool). A failback is probed from the pre-batch hook, so the first batch after a failback is paced; the first batch after a mid-write failover is sent unpaced and the drain-pacing ramp restarts on the next batch. |
+| `failback_every` | duration | `60s` (when `failover_endpoints` is set) | While on a failover endpoint, probe the primary this often and return to it on success — between batches, never inside one. `0s` = stay on the secondary until it fails. Ignored without `failover_endpoints`. Worst case, the probe adds up to `min(output timeout, 2s)` to one batch per interval while the primary is black-holed (dial doesn't return promptly). |
 | `framing` | string | `newline` | **TCP only.** `newline` (one message per LF — what syslog-ng's `network()` source and most receivers expect) or `octet-counting` (RFC 6587 `LEN SP MSG`; preserves embedded newlines but needs an octet-counting-aware receiver, e.g. syslog-ng's `syslog()` source). Setting it with `protocol: udp` is a config error |
 | `sequence` | bool | `false` | add a `[seq@66371 session=".." n=".."]` SD element with a per-event monotonic counter. A receiver behind a one-way link detects **loss** (gaps in `n`) and **agent restarts** (`session` change). Counters are assigned at send time, so retried batches get fresh numbers — `n` detects gaps, not duplicates |
 | `max_datagram_size` | int | `8192` | **UDP only.** Datagrams are truncated to this many bytes (an over-MTU/oversized send would otherwise fail forever and wedge the spool drain). A truncation counts `logrok_agent_udp_truncated_total` and logs a one-time WARN, so a too-small value is visible rather than silently cutting messages — raise it if your receiver accepts more |
@@ -1485,6 +1536,11 @@ key becomes `_`. The **PRI** value is clamped defensively — severity into 0–
 peer-injected out-of-range value can never emit a malformed `<247>`/`<-1>` frame a strict receiver rejects.
 Server verification is **on by default** when `tls: true`; `insecure_skip_verify` is the only way to disable it.
 
+**Metrics.** Per destination: `output_<name>_failovers_total`, `output_<name>_failbacks_total`,
+`output_<name>_active_endpoint` (0 = primary, 1+ = position in `failover_endpoints`); on `/metrics` the
+labelled families `logrok_agent_output_failovers_total`, `…_failbacks_total`, `…_active_endpoint`. Present
+only for destinations that configure failover.
+
 ### `snare` ✅ — Snare-format (SnareCore) over syslog, for SIEM-legacy interop — **Apex**
 
 Emits events as the legacy **Snare format** — the tab-delimited `MSWinEventLog` line that the Snare
@@ -1507,6 +1563,10 @@ SIEM side; otherwise the standard `syslog` output is the normal choice.
 | `server_name` | string | from `endpoint` | verification name / SNI override |
 | `cert_source` | string | `static` | `static` (use `cert_file`/`key_file`) or `enrolled` (present the control-plane-issued cert from `management.tls.mode: enrolled`; mutually exclusive with `cert_file`/`key_file`) |
 | `insecure_skip_verify` | bool | `false` | **DEV ONLY** — disables server verification |
+
+`snare` shares the `syslog` output's implementation, so `failover_endpoints` and `failback_every` (see the
+[`syslog` output](#syslog---rfc-5424-over-tcp-tlsmtls-or-udp-diode-mode)) work identically here — one primary,
+in-attempt failover to the next endpoint, probe-based failback.
 
 Emits the classic tab-delimited **"MSWinEventLog" Snare line** (Snare Windows Agent / NXLog `om_snare`
 parity), so a SIEM configured for a legacy NXLog/Snare feed ingests the agent with no re-tooling. The line is

@@ -223,7 +223,7 @@ The shape: `service`, `management`, `buffer`, then lists of `inputs` / `processo
 has a `type` plus that module's own keys. Today's modules:
 
 - **Inputs:** `windows_eventlog`, `etw` (Windows ETW real-time trace sessions — kernel/analytic telemetry that never reaches the Event Log; see [Windows ETW — telemetry beyond the Event Log](#windows-etw--telemetry-beyond-the-event-log)), `wmi` (Windows WMI/CIM system inventory & state via WQL polling; see [Windows WMI — system inventory & state via WQL](#windows-wmi--system-inventory--state-via-wql)), `filetail` (globs, rotation, multiline, restart-resume, plus `format: cri|docker|auto` for Kubernetes container-log parsing — see [Kubernetes](#kubernetes)), `journald` (Linux), `linux_audit` (Linux kernel audit trail — process executions, file-access watches, logins; see [Linux audit trail — kernel-level security events](#linux-audit-trail--kernel-level-security-events)), `bsm_audit` (Solaris BSM audit trail — the same evidence on the extended-platform tier, decoded with the OS's own `praudit`; see [Solaris BSM audit trail](#solaris-bsm-audit-trail--the-same-evidence-on-solaris)), `oslog` (macOS), `syslog_in`, `relay_in` (ack'd-transport receiver), `http_in` (HTTP(S) POST ingress — webhooks/IoT/edge), `mqtt_in` (MQTT 3.1.1 subscriber — IoT/edge brokers), `snmptrap_in` (SNMP v1/v2c/v3 trap + inform receiver — OT/network devices), `modbus_in` (Modbus TCP **and RTU/serial** register polling that emits OT *events* — changes, threshold crossings, device outages — see [Modbus — OT events, not register streams](#modbus--ot-events-not-register-streams))
-- **Processors:** `add_fields`, `filter`, `expr` (conditional set/drop/rename), `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → fields), `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (edge volume reduction incl. a hard daily budget — see [Reduce volume at the edge](#reduce-volume-at-the-edge)), `adaptive_sample` (load-adaptive sampling rate), `redact` (mask / hash / drop sensitive values at the source), `lookup` (join events against a local asset table), `file_hash` (attach a changed file's digest to the event that reported the change)
+- **Processors:** `add_fields`, `filter`, `expr` (conditional set/drop/rename), `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → fields), `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (edge volume reduction incl. a hard daily budget — see [Reduce volume at the edge](#reduce-volume-at-the-edge)), `adaptive_sample` (load-adaptive sampling rate), `redact` (mask / hash / drop sensitive values at the source), `lookup` (join events against a local asset table), `file_hash` (attach a changed file's digest to the event that reported the change), `noise_fingerprint` (drop or mark events whose message matches a noise template decided centrally — see [Reduce volume at the edge](#reduce-volume-at-the-edge))
 - **Outputs:** `syslog` (TLS / mTLS, UDP diode mode, JSON encoding), `snare` (Snare / "MSWinEventLog" tab-delimited format over syslog — drop-in interop for a SIEM configured for a legacy NXLog/Snare feed; shares the syslog transport), `relay` (ack'd reliable transport, agent→agent), `otlp` (OpenTelemetry Protocol, gRPC or HTTP), `hec` (Splunk HTTP Event Collector — response-mode or opt-in indexer-ack commit; see [Forwarding to Splunk (HEC)](#forwarding-to-splunk-hec)), `loki` (Grafana Loki push API — stream labels + structured metadata; see [Forwarding to Grafana Loki](#forwarding-to-grafana-loki)), `kafka` (Apache Kafka / Kafka-compatible brokers, per-record acks; see [Forwarding to Kafka](#forwarding-to-kafka)), `s3` (time-partitioned NDJSON to S3 / S3-compatible stores; see [Forwarding to S3 object storage](#forwarding-to-s3-object-storage)), `sentinel` (Microsoft Sentinel Logs Ingestion API; see [Forwarding to Microsoft Sentinel](#forwarding-to-microsoft-sentinel)), `xsiam` (Cortex XSIAM HTTP log collector; see [Forwarding to Cortex XSIAM](#forwarding-to-cortex-xsiam))
 - **Control-plane channel** (`management`): the central-management connection also supports mTLS, mirroring the syslog output. Set `management.tls.cert_file`/`tls.key_file` to present a client certificate to the control plane, and `management.tls.ca_file` to pin the control-plane server's CA instead of relying on system roots. `tls.mode: static` uses operator-provided cert files; `tls.mode: enrolled` is now available — the agent obtains and auto-renews a control-plane-issued client cert (no manual cert files needed), with the private key generated locally and never leaving the host. Revocation is handled by the control plane — enrolled certs are short-lived and simply stop being renewed — which requires a control plane implementing the agent-cert lifecycle (the logrok control plane ships it: per-tenant CA, short-lived auto-renewed client certs, instant revocation; any compatible implementation can provide the same endpoints). The enrolled cert can also be presented on the **data plane** via `cert_source: enrolled` on `syslog`/`relay` outputs — see [Securing the link](#securing-the-link-tls--mtls) below.
 
@@ -767,6 +767,27 @@ Three things to know before you rely on it:
 - **A bundle is a bearer credential** — it contains the agent's API key when one is issued. Treat
   the stick like a key, keep the file `0600`, and prefer per-site bundles over one fleet-wide file.
 
+### What the control plane can see of your configuration
+
+With `management.report_config` on (the default) each heartbeat carries a hash of the running
+configuration and, when the control plane holds a different one, the configuration text itself with
+every secret replaced by `${logrok:keep}` — tokens, API keys, passwords, passphrases and
+`Authorization`-style headers never leave the host. Any key whose name contains `token`, `password`,
+`passwd`, `secret`, `api_key`, `apikey`, `passphrase`, `private_key` or `credential` counts as a secret.
+File paths and identifiers stay readable. Your comments and key order survive; formatting (indentation,
+blank lines, quoting style) is normalized, so expect the fleet view to look tidied, not byte-identical.
+
+The control plane can adopt that text as the agent's managed configuration. When the adopted
+configuration is pulled back it still carries the markers, and the agent fills in its own local values
+before writing the file, so the round trip closes without the control plane ever holding a secret. The
+whole pull is refused — nothing is written — when a marker has no local value, sits under a key that is
+not a secret (the kept value would be reported in clear next time), is only part of a value, or when a
+secret carries the fleet view's `<redacted>` placeholder (text copied from the view instead of adopted).
+A refusal is reported on the next heartbeats as a failed apply for that version, so it shows in the fleet
+view rather than looking like a slow agent. Files with more than one YAML document are not reported and
+cannot be adopted. A configuration text larger than 1 MiB is reported by hash only. Set
+`report_config: false` to send nothing.
+
 ### Finding the control plane automatically (`endpoint: auto`)
 
 On a flat or OT LAN segment — where typing the same URL into a thousand configs invites a thousand
@@ -1107,6 +1128,30 @@ must land somewhere. Routing requires the same Apex entitlement as fan-out; a de
 `when:` conditions with a loud warning instead of silently filtering your collection.
 Full reference: [`outputs`](CONFIGURATION.md#outputs).
 
+### Primary and secondary collectors
+
+This is a **Core** capability on the `syslog` output (free; on `snare` it follows that output's Apex tier). Most sites run two collectors. Give the syslog output both, and it moves to the next one **inside the
+same delivery attempt** when the active one refuses a connection or drops a write — so a collector outage
+costs one reconnect, not a spool-and-wait:
+
+```yaml
+outputs:
+  - type: syslog
+    name: siem
+    endpoint: "collector-a.example:6514"
+    failover_endpoints: ["collector-b.example:6514"]
+    failback_every: 60s      # probe collector-a while on b; return when it answers. 0s = stay on b.
+    tls: true
+    ca_file: /etc/logrok-universal-agent/ca.pem
+```
+
+The spool still exists — it takes over only when **every** endpoint is down. Watch
+`output_siem_active_endpoint` (0 = primary) and `output_siem_failovers_total`; a switch is also one WARN
+log line naming both endpoints. Failback happens between batches, never inside one; a batch that failed
+part-way is resent whole on the next endpoint, so both collectors may see it — the same bounded-duplicate
+behaviour a spool retry has always had. This is the syslog and Snare outputs only (TCP/TLS); the other
+destinations sit behind their own load balancers.
+
 ### Forwarding to OpenTelemetry (OTLP)
 
 Use the `otlp` output instead of (or alongside, via [fan-out](#fan-out-to-multiple-destinations))
@@ -1333,6 +1378,15 @@ format doesn't match `encoding` — fix either side and the backlog delivers. Fu
 [Configuration Reference](CONFIGURATION.md#xsiam---palo-alto-cortex-xsiam-http-log-collector).
 
 ### Reduce volume at the edge
+
+**Noise decided centrally, removed at the source.** When your platform classifies a log template as noise,
+the `noise_fingerprint` processor enforces that decision on the host: it computes the same template
+fingerprint the platform computes at ingest (identifiers, addresses and numbers masked, then hashed) and
+drops or marks every event whose fingerprint is in its set — one hash lookup per event, so thousands of
+templates cost the same as one. A managed configuration can carry the set today; the platform filling it in
+automatically follows on its side. By default events of severity err and worse always pass. Put it first in
+the processors list, before anything that rewrites the message, and note it cannot match on a Snare
+destination or a syslog destination with `encoding: json` (those rewrite the message before it is sent).
 
 The `sample`, `throttle`, `dedup`, `trim_fields`, and `quota` processors cut log volume **before it leaves the host**,
 reducing SIEM ingest costs without losing security-critical signal.
@@ -1901,7 +1955,13 @@ Three properties worth knowing:
   is full under `when_full: block`), `spool_write_errors_total` (should stay flat — a climbing value means the
   spool disk is failing a write/fsync; the agent retries and never drops those events, so a persistent fault
   backpressures the inputs — treat it as "the spool disk needs attention"), `last_forward_timestamp_seconds`
-  (recent).
+  (recent), `output_event_delay_seconds` (how stale the newest delivered event is — it does not move while a
+  destination is down, because it samples only batches that were actually accepted; it spikes when the
+  backlog starts draining and falls as the spool empties; a value that is large while `buffer_depth` is 0
+  points at the source's clock, not at the agent — use `buffer_depth` for the outage itself),
+  `pipeline_latency_seconds` (how long the agent itself held events; at most around your batch timeout when
+  healthy; under load batches fill by size and it is far lower), `processor_reduction_ratio` (the share of
+  received events your processors removed — the number behind "reduce at the edge").
 - **Fleet telemetry (managed mode):** a centrally managed agent also reports the same signals to the control
   plane on every heartbeat as a self-describing metrics map, plus process telemetry — uptime, cumulative CPU
   seconds, and resident memory (memory on Linux and Windows; a metric that is unavailable on a platform is
@@ -1929,7 +1989,7 @@ proprietary OS subsystem (Windows Event Log, ETW, WMI, `linux_audit`, `oslog`, `
 named vendor or platform API (`hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`,
 `snare`), or adds fleet-scale machinery (disk spool, fleet management, edge reduction,
 enrolled mTLS, relay, Kubernetes container logs, UDP/data-diode output, fan-out, extended
-OS platforms, OT ingest — `snmptrap_in`, `modbus_in` — and file-content hashing, `file_hash`) is Apex. TLS is never gated. Full model, license-file format, and state
+OS platforms, OT ingest — `snmptrap_in`, `modbus_in` — file-content hashing, `file_hash`, and noise enforcement at the source, `noise_fingerprint`) is Apex. TLS is never gated. Full model, license-file format, and state
 machine: [LICENSING.md](LICENSING.md).
 
 > **Upgrading from 1.1.x or earlier — read this.** Fifteen modules are Apex but were not
@@ -2048,7 +2108,7 @@ events from a local CSV/JSON table (asset inventory, CMDB export) so hostnames a
 facts — see [Enriching events from an asset table](#enriching-events-from-an-asset-table). `file_hash` attaches
 the digest of a changed file to the event that reported the change, so the platform can compare content while
 the event still carries the user responsible — see
-[File-integrity events](#file-integrity-events-fim--what-the-agent-does-and-what-it-deliberately-doesnt).
+[File-integrity events](#file-integrity-events-fim--what-the-agent-does-and-what-it-deliberately-doesnt). `noise_fingerprint` ✅ enforces platform noise decisions on the host (the same template fingerprint logrok computes at ingest; drop or mark; err and worse always pass).
 
 **Outputs:** `syslog` (RFC 5424 with TLS/mTLS over TCP, UDP diode mode, JSON encoding), `snare` (the legacy
 Snare/"MSWinEventLog" format for a SIEM expecting an NXLog/Snare feed), `relay` (ack'd reliable agent→agent

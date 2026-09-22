@@ -29,7 +29,7 @@ buffer:
   dir: /var/lib/logrok-agent/spool
   max_bytes: 1073741824
   when_full: block
-  flush_every: 2s
+  flush_every: 2s          # spool drain cadence (recovery pacing)
 
 inputs:
   # ---------------------------------------------------------------------------
