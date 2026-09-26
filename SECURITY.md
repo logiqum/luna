@@ -1,29 +1,42 @@
 # Security Policy
 
-LUnA is a security-sensitive endpoint agent, and we take vulnerability reports seriously.
-
 ## Reporting a vulnerability
 
-**Please do not open a public issue for security reports.** Use one of:
+Email **security@logiqum.com**. Please do not open a public issue for anything you believe is a
+security vulnerability.
 
-- **GitHub private vulnerability reporting** — the **Report a vulnerability** button on this repository's
-  [Security tab](https://github.com/logiqum/luna/security/advisories/new) (preferred).
-- **Email** — `contact@logiqum.com`
+Include what you can: the agent version (`logrok-universal-agent -version`), platform (OS/arch),
+deployment mode (standalone or centrally managed), steps to reproduce, and the impact as you
+understand it.
 
-Please include the affected version, platform/OS, a description, and reproduction steps where possible. We aim
-to acknowledge within **2 business days** and will keep you informed through investigation and remediation.
-We're glad to credit reporters who would like to be credited.
+What to expect:
 
-## Supported versions
+- **Acknowledgement within 3 business days.**
+- Triage and a severity assessment, shared with you.
+- A fix targeted at the latest release; critical issues may warrant an out-of-band release.
+- **Coordinated disclosure**: we ask for up to 90 days before public disclosure, and we credit
+  reporters in the release notes unless you prefer otherwise.
 
-The **latest release** receives security fixes. Older releases are not maintained — please upgrade.
-
-## Verifying your download
-
-Every release ships a `SHA256SUMS` manifest, and the multi-arch container image is **cosign-signed**. Always
-verify before deploying — see the README's *Verify what you downloaded* section. Public key: `cosign.pub`.
+There is currently no paid bug-bounty program.
 
 ## Scope
 
-This repository hosts the public downloads and operator documentation. Source-level matters are handled by
-Logiqum; the channels above reach the right people regardless of where a fix ultimately lands.
+- The logrok universal agent: the agent binary and every packaged artifact we publish for it
+  (installers, service wrappers, container image, presets and example configurations).
+- Vulnerabilities in third-party dependencies are in scope when the agent's usage makes them
+  exploitable. Every release runs a reachability-based vulnerability gate against pinned
+  dependencies, and assessments of non-exploitable findings are published in
+  [docs/security/cve-assessments.md](docs/security/cve-assessments.md).
+
+## Supported versions
+
+Security fixes land in the **latest release**. The agent upgrades in place from any prior 1.x
+version (configuration and on-disk state are forward-compatible within a major version), so staying
+current is the supported posture.
+
+## Verifying what you run
+
+Release artifacts ship with SHA-256 checksums; binaries and the container image are signed —
+verification instructions and the public key are published alongside the release artifacts. The
+agent is a single static binary with no runtime dependencies, which keeps the surface auditable:
+what you download is what runs.

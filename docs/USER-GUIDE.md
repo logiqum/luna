@@ -103,6 +103,9 @@ until you set your aggregator endpoint), and an auto-start **LocalSystem** servi
 (install the new MSI over the old); **uninstall keeps the config and the spool** (delete
 `C:\ProgramData\logrok-universal-agent\` manually for a purge). Release `.exe` and `.msi` artifacts are
 Authenticode-signed (signer: Logiqum Kft.) — verify with `Get-AuthenticodeSignature` before installing.
+The service has no console, so the default configuration writes the structured log to
+`C:\ProgramData\logrok-universal-agent\agent.log` (`service.log_file`; rotated once at 50 MiB, and the
+report of a crash lands there too). Configurations from before 1.5.0 do not carry the line — add it.
 
 ### Windows — run it manually
 Interactively (first run / debugging) from an elevated prompt:
@@ -1651,7 +1654,7 @@ service logrok_agent status
 | `logrok_agent_enable` | `NO` | `YES` to start at boot |
 | `logrok_agent_config` | `/usr/local/etc/logrok-agent/agent.yaml` | |
 | `logrok_agent_runas` | `logrok` | the user the agent runs as |
-| `logrok_agent_statedir` | `/var/db/logrok-agent` | spool + state. **Move this** if your appliance has a small or read-mostly root filesystem — pfSense and OPNsense typically do |
+| `logrok_agent_statedir` | `/var/db/logrok-agent` | spool, the enrollment state file, and a remotely delivered upgrade (exported to the agent as `STATE_DIRECTORY`). **Move this** if your appliance has a small or read-mostly root filesystem — pfSense and OPNsense typically do |
 | `logrok_agent_logfile` | `/var/log/logrok-agent.log` | the agent's own output |
 | `logrok_agent_flags` | *(empty)* | extra flags |
 
@@ -2051,6 +2054,8 @@ that archive are what to hand them. Anything missing: `security@logiqum.com`.
 | TLS handshake / "unknown authority" | wrong/missing `ca_file` | point `ca_file` at the CA that signed the aggregator cert |
 | Aggregator rejects the agent (mTLS) | no/!valid client cert | set `cert_file` + `key_file`; ensure the aggregator trusts your client CA |
 | Security channel missing on Windows | not running as admin | run the service as administrator (Security needs `SeSecurityPrivilege`) |
+| The Windows service stopped with only a "terminated unexpectedly" (7034) event and no agent log | `service.log_file` is not set — a service has no console, so the structured log and any crash report went nowhere | set `service.log_file` (the MSI's default configuration since 1.5.0 does), restart, read the file. Since 1.5.0 the service also writes a panic (event 1, with its stack) or a fatal exit (event 2) to the **Application** event log under the source `logrok-universal-agent`, and configures its own restart-on-failure recovery |
+| An agent shows `refused` or `error` under Upgrade on the Agents page | the offer did not match the host, the host opted out, or a verification step failed | the reason is in the fleet view and the agent log; see [Upgrading agents from the control plane](#upgrading-agents-from-the-control-plane) |
 | `events_dropped_total` climbing | spool hit `max_bytes` during a long outage | raise `max_bytes` or fix the link; what's dropped depends on `buffer.when_full` (default `drop_oldest`). Set `when_full: block` for zero loss (back-pressures the source instead) |
 | `events_dropped` climbing with the `otlp` output | receiver is permanently rejecting batches (auth? schema?) | check the `otlp` WARN logs / `dead_letter_dir` for the rejection cause |
 | `hec` output logs a 401/403 authentication WARN | wrong/revoked/disabled HEC token | check `token` against the Splunk HEC token config; events are **spooled, not dropped**, and are retried once the token is fixed |
@@ -2079,7 +2084,85 @@ logrok is one possible destination. When forwarding into a logrok deployment:
 - Nothing about the agent is logrok-specific — the same config forwards to any syslog/TLS aggregator. logrok's
   docs cover the *downstream* (routing, storage, analysis); this guide covers the *agent*.
 
+## Upgrading agents from the control plane
+
+With central management, agents upgrade themselves when the control plane's Agents page offers them a
+version (available for agents 1.5.0 and later; the control plane needs the matching release pack uploaded
+to its catalog). What happens on the host, in order:
+
+1. **The offer is verified.** It arrives on the heartbeat, signed by the control plane, and must name this
+   agent, its operating system and CPU architecture, and be unexpired. Anything else is refused and reported
+   as such.
+2. **The binary is downloaded from the control plane** (never from the internet — air-gapped sites work)
+   and checked three ways: its checksum must equal the offer's, equal what the control plane announced, and
+   appear in a `SHA256SUMS` that was signed at build time with the logrok **release** key. The agent verifies
+   that signature with the key built into it. A control plane cannot sign binaries, so a compromised or
+   misconfigured one cannot make an agent install something logiqum did not build.
+3. **The new binary is run once, out of process**, against this host's configuration (`-self-check`). It
+   must load the configuration, pass the FIPS-posture and license checks, and report the offered version.
+4. **Only then is it installed and the agent restarted.** Nothing is touched before step 3 passes; a
+   failure at any step leaves the running binary as it was and is reported on the next heartbeat with its
+   reason.
+5. **The new binary reports "confirmed"** on its first heartbeat. If the host comes back on the old binary
+   instead, that is reported as an error naming both versions.
+
+The fleet view shows the stage (`offered` → `downloading` → `verified` → `restarting` → `confirmed`, or
+`refused` / `error` with the reason) as it happens.
+
+**Every supported platform and architecture can upgrade itself.** The release pack carries a binary for
+each platform the release ships (Linux amd64/arm64/armv7/riscv64/mipsle, Windows amd64/arm64, macOS
+amd64/arm64, FreeBSD amd64/arm64, NetBSD, OpenBSD, Solaris, AIX) and the control plane picks the one
+matching what the agent reports. What differs per install is only *where the new binary lands* and
+*what restarts the process*:
+
+| Install | Where the new binary goes | Restart | Needs |
+|---|---|---|---|
+| Linux deb / rpm (systemd) | staged under the unit's state directory (`/var/lib/logrok-agent/upgrade`) | in place, same PID | nothing — the package sets it up |
+| Linux tarball / raw binary, Solaris, AIX, NetBSD, OpenBSD | staged under `management.upgrade_dir` (default: `$STATE_DIRECTORY/upgrade`, else `upgrade/` beside the state file) | in place, same PID | a state directory the agent's user can write (`state_path` or `STATE_DIRECTORY`) |
+| FreeBSD rc script | staged under `logrok_agent_statedir` | in place, same PID (daemon(8) sees nothing) | nothing — the rc script exports the state directory |
+| macOS pkg (launchd) | staged beside the state file under the install prefix | in place, same PID | nothing |
+| Windows MSI / `sc create` service | the executable under Program Files is replaced; the previous one stays as `logrok-universal-agent.prev.exe` | the service exits and the Service Control Manager restarts it (the agent sets that recovery action itself at every start) | nothing |
+| Container (Docker, Kubernetes) | staged on the `/var/lib/logrok-agent` volume | in place, same PID | a persistent volume, or the image version returns at the next pod restart. Image-managed fleets normally set `management.remote_upgrade: false` and roll the image tag instead |
+
+On every Unix install the agent **never overwrites the file your package manager installed**: at every
+start the packaged binary re-verifies the staged one against the release key and runs it if it is newer;
+a later package upgrade simply takes over. **Roll back** by deleting the staging directory (or by
+offering the previous version from the control plane).
+
+**Configuration compatibility, guaranteed.** A new version accepts every configuration the previous
+minor version accepted (and a major version every configuration of the previous major) — see the
+[support policy](SUPPORT-POLICY.md#configuration-compatibility). The control plane is only ever
+offered a version to agents inside that window, and the self-check in step 3 refuses a host whose
+configuration the new binary does not fully understand — every key, module and module option is
+checked by constructing the modules exactly as the agent would at start — naming what it refuses.
+
+**Where the pack comes from.** Every release publishes `luna-<version>-release.tar` (and a stable-name
+copy, `luna-release.tar`, for the latest release) beside the binaries. An online control plane can fetch
+it from there; an air-gapped one takes it by upload on the Agents page — the pack is signed with the
+logrok release key and verified on upload and again on every host, so the path it travelled does not
+matter.
+
+**Turning it off.** `management.remote_upgrade: false` refuses every offer (the control plane sees
+"refused") — for hosts that package management or a change process owns.
+
+**What can go wrong**
+
+| Reported as | Meaning | What to do |
+|---|---|---|
+| `refused` — "management.remote_upgrade is false" | the host opted out | withdraw the offer, or change the host's configuration |
+| `refused` — "built for windows/amd64, this agent runs on linux/arm64" | the catalog holds no build for this host, or the agent's platform record is wrong | check the release pack covers the platform |
+| `error` — "is not writable by the agent" | the staging directory (Unix) or the install directory (Windows) cannot be written | set `management.upgrade_dir` to a directory the agent's user owns |
+| `error` — "signature does not verify" / "not in the release-signed SHA256SUMS" | the pack in the catalog was not signed with the logrok release key, or was altered | re-upload a pack from the release page; never override |
+| `error` — "the new binary refuses this configuration" | the new version rejects a configuration the old one accepted | read the reason, fix the configuration, re-offer |
+| `error` — "restarted as 1.4.0, expected 1.5.0" | the host came back on the old binary (the staged one could not be executed, or the swap did not take) | check the agent log; on Unix confirm `upgrade_dir` is not mounted `noexec` |
+
 ## Maturity & what's coming
+
+**Available now — fleet operations:** central enrollment, configuration pull with validated hot reload and
+last-known-good rollback, the running configuration reported (secrets kept on the host) and adoptable
+from the fleet view, and **remote upgrade from the control plane** (signed offer, release-key-verified
+binary, out-of-process self-check, staged restart; `management.remote_upgrade`) — the last shipped
+2026-09-25 and awaits its first real fleet rollout after the 1.5.0 release.
 
 **Available now — inputs:** Solaris BSM audit trail (`bsm_audit` — logins, privilege use and other audited actions with the acting user attached, decoded via the OS's own `praudit`; runtime-verified on real Solaris 11.4), Windows Event Log (`windows_eventlog` — verified end-to-end on real Windows
 hardware, incl. Sysmon; XPath filtering, saved `.evtx`/`.evt` file reading), Windows ETW real-time trace

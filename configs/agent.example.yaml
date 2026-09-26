@@ -13,6 +13,8 @@
 service:
   mode: service            # service | standalone
   log_level: info          # debug | info | warn | error
+  # log_file: /var/log/logrok-agent/agent.log   # append the log here instead of stdout (rotated once
+  #                        # at 50 MiB); crash reports go there too. Set on Windows (a service has no console)
   # metrics_listen: "127.0.0.1:9090"   # serve Prometheus metrics at /metrics (bind localhost)
   # fips: on               # on | off (unset = run as built; the shipped build is FIPS) — SETS the crypto posture
                            # Applied by re-executing once at startup; the PID does not
@@ -39,13 +41,21 @@ management:
   # enrollment_token: "ONE-TIME-TOKEN"   # exchanged on first start; removable afterwards
   # enrollment_bundle: /media/usb/site-a.bundle   # AIR-GAP: signed identity+entitlement(+config),
   #                                 # verified offline, adopted once. No control plane needed.
-  # state_path: ""         # default: agent-state.json next to this file (0600; holds agent_id + api_key)
+  # state_path: ""         # default: $STATE_DIRECTORY/agent-state.json when the service manager names a state
+  #                        # directory (systemd StateDirectory=, the FreeBSD rc script, the container image),
+  #                        # else agent-state.json next to this file (0600; holds agent_id + api_key)
   # api_key: ""            # manual provisioning alternative to enrollment
   # tenant_slug: "default"
   # heartbeat_every: 30s
   # config_poll_every: 60s
   # report_config: true    # heartbeat carries the running config so the fleet view can show/adopt it;
   #                        # secrets are replaced by ${logrok:keep} before sending. false = send nothing
+  # remote_upgrade: true   # let the control plane upgrade this agent from its Agents page. Only a
+  #                        # binary in a SHA256SUMS signed with the logrok release key (verified on
+  #                        # this host) that passes a self-check against this config is installed;
+  #                        # false = refuse every offer (hosts upgraded by hand / package manager)
+  # upgrade_dir: ""        # Unix: where the delivered binary is staged (default $STATE_DIRECTORY/upgrade,
+  #                        # else upgrade/ beside state_path); the packaged binary is never overwritten
   # Control-plane mTLS (optional; hardens the api-key auth with a client cert).
   # tls:
   #   mode: static                       # static (BYO cert files) | enrolled (control-plane-issued + auto-renewed cert; no cert_file/key_file needed)
