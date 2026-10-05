@@ -70,9 +70,18 @@ agent binary. It is **not** encrypted — it's signed (tamper-evident), so it's 
                "capabilities": [], "agent_limit": 0 },
   "signature": "<base64 ed25519 over the payload bytes>",
   "algorithm": "ed25519",
-  "key_id": "logrok-v1"
+  "key_id": "logrok-prod-1"
 }
 ```
+
+`key_id` names the signing key. A licence issued by Logiqum is signed directly with the
+production key (`logrok-prod-1`) — a licence file must be, or the agent refuses it. An entitlement minted by a **control plane** on your
+premises is signed with that installation's own key and carries one more field,
+`issuer_cert`: Logiqum's signed certificate for the installation key, stating the highest
+tier, the host count and the end date that key may grant. The agent checks the certificate,
+then the entitlement, and caps the entitlement's tier and end date by the certificate; past
+the certificate's end date nothing that control plane signed is accepted. The host count is
+enforced by the control plane, which counts its enrolled agents.
 
 Entitlement fields: `context`, `tier` (`core` or `apex`), optional `capabilities[]`
 (grant individual features above the tier, e.g. a Core+macOS add-on), `agent_limit`
@@ -86,8 +95,9 @@ informational `customer`/`license_id`/`issued_at`.
 |---|---|
 | Standalone license file | wherever `licensing.license_file` points (convention: `/etc/logrok-agent/agent.lic`, or `C:\ProgramData\logrok-universal-agent\agent.lic`). Operator-managed; survives upgrades. |
 | Enrollment-derived | persisted inside the agent **state file** (`agent-state.json`, next to the config by default) as the `entitlement` field — written at enrollment, re-verified offline on every load. |
-| Issuer **public** key | embedded in the agent binary. |
-| Issuer **private** key | **never in the agent** — held by the vendor. Only the holder of the private key can mint a license. |
+| Issuer **public** key | embedded in the agent binary — release binaries embed only the production key. |
+| Issuer **private** key | **never in the agent** — held offline by the vendor. Only the holder of the private key can mint a license or certify a control plane's signing key. |
+| Control-plane signing key | held by your control plane, certified by the vendor for your licence; used to sign the entitlements, enrollment bundles and upgrade offers it hands to agents. |
 
 ## 5. Getting a license
 

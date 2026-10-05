@@ -1950,6 +1950,19 @@ Three properties worth knowing:
   processors run — that is *before* [`redact`](#redacting-sensitive-values-before-they-leave-the-host)
   has masked anything, so treat a tap like reading the spool: same trust level.
 
+**When the control plane rotates its agent CA** (`management.tls.mode: enrolled`): the agent trusts
+`ca_file` plus every CA certificate the control plane delivers with the client certificate, and rebuilds
+that trust the moment a renewal brings a different chain — so an agent that renews during the rotation's
+overlap period already trusts the next root before the cutover, with nobody editing `ca_file`. Each
+heartbeat reports the fingerprints of the roots it trusts, which is what the control plane's rotation
+status counts as "moved".
+
+**What the agent tells the control plane about itself, and why.** At enrollment it sends a hashed,
+stable machine identity (`host_id`: a salted SHA-256 of the OS machine id — the raw id never leaves the
+host) so a reinstall of the same host and a different host with the same name are distinguishable. On
+every heartbeat it reports the fingerprint of the license entitlement it has applied, so a lost reply
+can never leave an agent on an old entitlement: the control plane re-sends until the two agree.
+
 ## Verify & monitor
 
 - **Metrics:** with `service.metrics_listen` set, scrape `http://<host>:<port>/metrics`. Key signals:
@@ -2004,7 +2017,9 @@ machine: [LICENSING.md](LICENSING.md).
 
 The short operator version:
 
-- **Managed by logrok?** Nothing to do — enrollment delivers the entitlement automatically.
+- **Managed by logrok?** Enrollment delivers the entitlement automatically, provided your
+  control plane holds a signing key certified by Logiqum for your licence; without one the
+  agent accepts no entitlement or upgrade offer from it and runs Core.
 - **Standalone with Apex features?** Set `licensing.license_file` to your issued `.lic`
   ([reference](CONFIGURATION.md)) and (re)start.
 - **Core-only config?** No license, no warnings, nothing changes — ever.
@@ -2015,6 +2030,9 @@ The short operator version:
   (degrade-to-Core): the agent keeps running everything Core, logs each removal, and
   restores the features immediately once a valid license is in place and the agent restarts
   or reloads. The agent never exits or blocks Core forwarding over licensing.
+- **Licences issued before this release** with the earlier signing key are no longer
+  accepted (the agent logs `unknown key_id` and runs Core) — ask support for a replacement
+  before upgrading.
 - **Watch it:** `logrok_agent_license_state{state=...}` on `/metrics` (alert on `grace` or
   `degraded` being 1); managed agents also report the same posture on every heartbeat.
 
@@ -2055,6 +2073,8 @@ that archive are what to hand them. Anything missing: `security@logiqum.com`.
 | Aggregator rejects the agent (mTLS) | no/!valid client cert | set `cert_file` + `key_file`; ensure the aggregator trusts your client CA |
 | Security channel missing on Windows | not running as admin | run the service as administrator (Security needs `SeSecurityPrivilege`) |
 | The Windows service stopped with only a "terminated unexpectedly" (7034) event and no agent log | `service.log_file` is not set — a service has no console, so the structured log and any crash report went nowhere | set `service.log_file` (the MSI's default configuration since 1.5.0 does), restart, read the file. Since 1.5.0 the service also writes a panic (event 1, with its stack) or a fatal exit (event 2) to the **Application** event log under the source `logrok-universal-agent`, and configures its own restart-on-failure recovery |
+| The agent logs `control plane does not recognise this agent (deleted, or its key was replaced) — clearing identity and re-enrolling` | the agent's record was deleted on the control plane, or a reinstall of the same host enrolled first and replaced its key (HTTP 401) | nothing to do if an enrollment token is configured: the agent re-enrolls once (at most once per 10 minutes). Without a token it keeps failing visibly — add `management.enrollment_token` and restart |
+| The agent logs `control plane revoked this agent — management calls stopped for this process` and `logrok_agent_management_revoked` reads 1 | an admin revoked the agent (HTTP 403); heartbeats, configuration pulls and certificate renewals stop for this process, log collection continues and spools where the data plane also refuses | ask an admin for a **new** enrollment token (one minted after the revocation — older tokens are refused), put it in the configuration and restart the agent |
 | An agent shows `refused` or `error` under Upgrade on the Agents page | the offer did not match the host, the host opted out, or a verification step failed | the reason is in the fleet view and the agent log; see [Upgrading agents from the control plane](#upgrading-agents-from-the-control-plane) |
 | `events_dropped_total` climbing | spool hit `max_bytes` during a long outage | raise `max_bytes` or fix the link; what's dropped depends on `buffer.when_full` (default `drop_oldest`). Set `when_full: block` for zero loss (back-pressures the source instead) |
 | `events_dropped` climbing with the `otlp` output | receiver is permanently rejecting batches (auth? schema?) | check the `otlp` WARN logs / `dead_letter_dir` for the rejection cause |
