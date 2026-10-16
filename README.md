@@ -13,8 +13,11 @@ across air-gapped or intermittent links.
 
 ## Download
 
-Every release attaches binaries, installers, and packages for all platforms under **stable, version-less
-names** (so links never change). Grab them from the [**latest release**](https://github.com/logiqum/luna/releases/latest):
+**Download: [logrok.com/download](https://logrok.com/download)** — installers for every platform, checksums and
+install commands.
+
+The same files are attached to every release under **stable, version-less names** (so links never change) —
+the [**latest release**](https://github.com/logiqum/luna/releases/latest) has them all:
 
 | Platform | Files |
 |---|---|
