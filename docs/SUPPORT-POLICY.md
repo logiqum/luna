@@ -78,4 +78,4 @@ release line.
 
 Every release ships a [CycloneDX](https://cyclonedx.org/) SBOM (`luna-sbom.cdx.json` among the
 release assets) listing the release's third-party components and their licenses, alongside the
-`NOTICE` attribution file.
+`NOTICE.txt` and `THIRD-PARTY-NOTICES.md` attribution files.

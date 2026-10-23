@@ -5,7 +5,7 @@ exact meaning of every config key see the **[Configuration Reference](CONFIGURAT
 task-oriented walkthrough.
 
 > The agent is **vendor-neutral**: it forwards standard **syslog (RFC 5424) over TCP/TLS** to *any* aggregator
-> (a SIEM, a plain syslog collector, or a [logrok](https://github.com/logiqum/logrok) deployment). This guide is written
+> (a SIEM, a plain syslog collector, or a logrok deployment). This guide is written
 > aggregator-agnostically; see [Using with logrok](#using-with-logrok) for the platform-specific setup.
 
 ## What it does
@@ -31,7 +31,12 @@ spool and replayed when it recovers — so an outage (or an air-gapped window) d
 Install a released package for your platform (below): Linux `.deb`/`.rpm`, Windows `.msi`, macOS `.pkg`.
 A single self-contained binary — no runtime, agent, or dependencies to install.
 
+<a id="install"></a>
 ## Install
+
+**Download: [logrok.com/download](https://logrok.com/download)** — installers for every platform, checksums and
+install commands. Installing or using LUnA means you accept the Logiqum End User License Agreement ([LICENSE](../LICENSE)). `-version` and
+`-help` print the same statement.
 
 ### Linux — Debian package (recommended)
 Releases ship `.deb` packages for amd64/arm64/armhf. They install the binary, a hardened systemd unit
@@ -225,10 +230,10 @@ All options, with defaults and implemented/planned status, are in the **[Configu
 The shape: `service`, `management`, `buffer`, then lists of `inputs` / `processors` / `outputs` where each entry
 has a `type` plus that module's own keys. Today's modules:
 
-- **Inputs:** `windows_eventlog`, `etw` (Windows ETW real-time trace sessions — kernel/analytic telemetry that never reaches the Event Log; see [Windows ETW — telemetry beyond the Event Log](#windows-etw--telemetry-beyond-the-event-log)), `wmi` (Windows WMI/CIM system inventory & state via WQL polling; see [Windows WMI — system inventory & state via WQL](#windows-wmi--system-inventory--state-via-wql)), `filetail` (globs, rotation, multiline, restart-resume, plus `format: cri|docker|auto` for Kubernetes container-log parsing — see [Kubernetes](#kubernetes)), `journald` (Linux), `linux_audit` (Linux kernel audit trail — process executions, file-access watches, logins; see [Linux audit trail — kernel-level security events](#linux-audit-trail--kernel-level-security-events)), `bsm_audit` (Solaris BSM audit trail — the same evidence on the extended-platform tier, decoded with the OS's own `praudit`; see [Solaris BSM audit trail](#solaris-bsm-audit-trail--the-same-evidence-on-solaris)), `oslog` (macOS), `syslog_in`, `relay_in` (ack'd-transport receiver), `http_in` (HTTP(S) POST ingress — webhooks/IoT/edge), `mqtt_in` (MQTT 3.1.1 subscriber — IoT/edge brokers), `snmptrap_in` (SNMP v1/v2c/v3 trap + inform receiver — OT/network devices), `modbus_in` (Modbus TCP **and RTU/serial** register polling that emits OT *events* — changes, threshold crossings, device outages — see [Modbus — OT events, not register streams](#modbus--ot-events-not-register-streams))
-- **Processors:** `add_fields`, `filter`, `expr` (conditional set/drop/rename), `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → fields), `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (edge volume reduction incl. a hard daily budget — see [Reduce volume at the edge](#reduce-volume-at-the-edge)), `adaptive_sample` (load-adaptive sampling rate), `redact` (mask / hash / drop sensitive values at the source), `lookup` (join events against a local asset table), `file_hash` (attach a changed file's digest to the event that reported the change), `noise_fingerprint` (drop or mark events whose message matches a noise template decided centrally — see [Reduce volume at the edge](#reduce-volume-at-the-edge))
-- **Outputs:** `syslog` (TLS / mTLS, UDP diode mode, JSON encoding), `snare` (Snare / "MSWinEventLog" tab-delimited format over syslog — drop-in interop for a SIEM configured for a legacy NXLog/Snare feed; shares the syslog transport), `relay` (ack'd reliable transport, agent→agent), `otlp` (OpenTelemetry Protocol, gRPC or HTTP), `hec` (Splunk HTTP Event Collector — response-mode or opt-in indexer-ack commit; see [Forwarding to Splunk (HEC)](#forwarding-to-splunk-hec)), `loki` (Grafana Loki push API — stream labels + structured metadata; see [Forwarding to Grafana Loki](#forwarding-to-grafana-loki)), `kafka` (Apache Kafka / Kafka-compatible brokers, per-record acks; see [Forwarding to Kafka](#forwarding-to-kafka)), `s3` (time-partitioned NDJSON to S3 / S3-compatible stores; see [Forwarding to S3 object storage](#forwarding-to-s3-object-storage)), `sentinel` (Microsoft Sentinel Logs Ingestion API; see [Forwarding to Microsoft Sentinel](#forwarding-to-microsoft-sentinel)), `xsiam` (Cortex XSIAM HTTP log collector; see [Forwarding to Cortex XSIAM](#forwarding-to-cortex-xsiam))
-- **Control-plane channel** (`management`): the central-management connection also supports mTLS, mirroring the syslog output. Set `management.tls.cert_file`/`tls.key_file` to present a client certificate to the control plane, and `management.tls.ca_file` to pin the control-plane server's CA instead of relying on system roots. `tls.mode: static` uses operator-provided cert files; `tls.mode: enrolled` is now available — the agent obtains and auto-renews a control-plane-issued client cert (no manual cert files needed), with the private key generated locally and never leaving the host. Revocation is handled by the control plane — enrolled certs are short-lived and simply stop being renewed — which requires a control plane implementing the agent-cert lifecycle (the logrok control plane ships it: per-tenant CA, short-lived auto-renewed client certs, instant revocation; any compatible implementation can provide the same endpoints). The enrolled cert can also be presented on the **data plane** via `cert_source: enrolled` on `syslog`/`relay` outputs — see [Securing the link](#securing-the-link-tls--mtls) below.
+- **Inputs:** `windows_eventlog`, `etw` (Windows ETW real-time trace sessions — kernel/analytic telemetry that never reaches the Event Log; see [Windows ETW — telemetry beyond the Event Log](#windows-etw--telemetry-beyond-the-event-log)), `wmi` (Windows WMI/CIM system inventory & state via WQL polling; see [Windows WMI — system inventory & state via WQL](#windows-wmi--system-inventory--state-via-wql)), `filetail` (globs, rotation, multiline, restart-resume, plus `format: cri|docker|auto` for Kubernetes container-log parsing — see [Kubernetes](#kubernetes)), `journald` (Linux), `linux_audit` (Linux kernel audit trail — process executions, file-access watches, logins; see [Linux audit trail — kernel-level security events](#linux-audit-trail--kernel-level-security-events)), `bsm_audit` (Solaris BSM audit trail — the same evidence on the extended-platform tier, decoded with the OS's own `praudit`; see [Solaris BSM audit trail](#solaris-bsm-audit-trail--the-same-evidence-on-solaris)), `oslog` (macOS), `syslog_in`, `relay_in` (ack'd-transport receiver), `http_in` (HTTP(S) POST ingress — webhooks/IoT/edge), `beats_in` (Beats / Logstash protocol — Filebeat, Winlogbeat and other Elastic Beats ship to the agent as a gateway; see [Receiving from Elastic Beats](#receiving-from-elastic-beats)), `fluent_in` (Fluent Bit / Fluentd Forward protocol — a Kubernetes Fluent Bit fleet ships to the agent as a gateway; see [Receiving from Fluent Bit or Fluentd](#receiving-from-fluent-bit-or-fluentd)), `otlp_in` (OpenTelemetry logs over OTLP gRPC/HTTP — SDK-instrumented apps and OpenTelemetry Collectors ship to the agent; see [Receiving OpenTelemetry logs](#receiving-opentelemetry-logs)), `hec_in` (Splunk HTTP Event Collector API — anything that sends to Splunk HEC can send to the agent; see [Receiving what was sent to Splunk HEC](#receiving-what-was-sent-to-splunk-hec)), `gelf_in` (GELF over UDP/TCP — Docker's gelf logging driver and Graylog logging libraries; Apex), `openwec_in` (Windows events from an OpenWEC collector — Windows hosts forwarding with the built-in Windows Event Forwarding, no agent installed; see [Agentless Windows hosts via OpenWEC](#agentless-windows-hosts-via-openwec); Apex), `mqtt_in` (MQTT 3.1.1 subscriber — IoT/edge brokers), `snmptrap_in` (SNMP v1/v2c/v3 trap + inform receiver — OT/network devices), `modbus_in` (Modbus TCP **and RTU/serial** register polling that emits OT *events* — changes, threshold crossings, device outages — see [Modbus — OT events, not register streams](#modbus--ot-events-not-register-streams))
+- **Processors:** `aggregate` (per-group counts per time window), `add_fields`, `filter`, `expr` (conditional set/drop/rename), `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → fields), `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (edge volume reduction incl. a hard daily budget — see [Reduce volume at the edge](#reduce-volume-at-the-edge)), `adaptive_sample` (load-adaptive sampling rate), `redact` (mask / hash / drop sensitive values at the source), `lookup` (join events against a local asset table), `file_hash` (attach a changed file's digest to the event that reported the change), `noise_fingerprint` (drop or mark events whose message matches a noise template decided centrally — see [Reduce volume at the edge](#reduce-volume-at-the-edge))
+- **Outputs:** `fluent` (Fluentd / Fluent Bit Forward protocol — feeds an existing Fluentd aggregator; acknowledged requests, shared key, failover), `beats` (Logstash / Graylog Beats input — the agent in place of a Beat; acknowledged windows, failover), `elasticsearch` (Elasticsearch / OpenSearch bulk API, ECS documents, per-document retry), `syslog` (TLS / mTLS, UDP diode mode, JSON encoding), `snare` (Snare / "MSWinEventLog" tab-delimited format over syslog — drop-in interop for a SIEM configured for a legacy NXLog/Snare feed; shares the syslog transport), `relay` (ack'd reliable transport, agent→agent), `otlp` (OpenTelemetry Protocol, gRPC or HTTP), `hec` (Splunk HTTP Event Collector — response-mode or opt-in indexer-ack commit; see [Forwarding to Splunk (HEC)](#forwarding-to-splunk-hec)), `loki` (Grafana Loki push API — stream labels + structured metadata; see [Forwarding to Grafana Loki](#forwarding-to-grafana-loki)), `kafka` (Apache Kafka / Kafka-compatible brokers, per-record acks; see [Forwarding to Kafka](#forwarding-to-kafka)), `s3` (time-partitioned NDJSON to S3 / S3-compatible stores; see [Forwarding to S3 object storage](#forwarding-to-s3-object-storage)), `sentinel` (Microsoft Sentinel Logs Ingestion API; see [Forwarding to Microsoft Sentinel](#forwarding-to-microsoft-sentinel)), `xsiam` (Cortex XSIAM HTTP log collector; see [Forwarding to Cortex XSIAM](#forwarding-to-cortex-xsiam))
+- **Control-plane channel** (`management`): the central-management connection also supports mTLS, mirroring the syslog output. Set `management.tls.cert_file`/`tls.key_file` to present a client certificate to the control plane, and `management.tls.ca_file` to pin the control-plane server's CA instead of relying on system roots (in `enrolled` mode the agent trusts the system roots, `ca_file` and the CA chain the control plane delivers together; `management.tls.system_roots: false` restricts it to the latter two). `tls.mode: static` uses operator-provided cert files; `tls.mode: enrolled` is now available — the agent obtains and auto-renews a control-plane-issued client cert (no manual cert files needed), with the private key generated locally and never leaving the host. Revocation is handled by the control plane — enrolled certs are short-lived and simply stop being renewed — which requires a control plane implementing the agent-cert lifecycle (the logrok control plane ships it: per-tenant CA, short-lived auto-renewed client certs, instant revocation; any compatible implementation can provide the same endpoints). The enrolled cert can also be presented on the **data plane** via `cert_source: enrolled` on `syslog`/`relay` outputs — see [Securing the link](#securing-the-link-tls--mtls) below.
 
 ## Deployment scenarios
 
@@ -475,8 +480,11 @@ Operator notes:
   root — and fails at start with an explicit error without it.
 - **Rules are yours.** The agent only *reads* the audit stream — it never loads or modifies audit rules.
   No rules loaded = only the default PAM/login events flow.
-- **Restart semantics (v1).** File mode keeps no offset checkpoint: a restart resumes from the end of the
-  log (`read_from: beginning` re-reads the whole file). Details and the full option table in the
+- **Restart semantics.** File mode saves its read position by default (under the agent's state
+  directory, `state_path` to move it, `""` to turn it off) and a restart resumes there, so records written
+  while the agent was stopped are delivered — including the rest of an `audit.log` that auditd rotated in the
+  meantime. `read_from` applies only to the very first start. Multicast mode cannot resume: the kernel feed
+  has no replay. Details and the full option table in the
   [Configuration Reference](CONFIGURATION.md#linux_audit--linux-only)'s `linux_audit` section.
 
 ### Solaris BSM audit trail — the same evidence on Solaris
@@ -579,6 +587,33 @@ outputs:
       key_file: /etc/logrok-agent/agent.key }
 ```
 
+The gateway forwards each device's own header: the receiver sees the sender's HOSTNAME, APP-NAME, PROCID and
+MSGID, and the fact that the message came through the gateway rides as a `source="syslog-in"` structured-data
+parameter (the `app`, `procid` and `msgid` parameters are kept too). For RFC 3164 senders, whose program name
+sits inside the message (`myapp[88]: text`), add `parse_tag: true` to the `syslog_in` input to lift it into
+APP-NAME and PROCID. A receiver that keyed on the older APP-NAME `syslog-in` can keep it with
+`header_from_fields: false` on the `syslog` output.
+
+**UDP at high rates:** UDP has no flow control, so datagrams the agent does not read in time are dropped by the
+kernel. The agent reads them in batches and asks for an 8 MiB receive buffer per socket (`udp_receive_buffer_bytes`;
+the kernel caps it at `net.core.rmem_max`, and the agent warns when it gets less). How many were dropped is reported
+on Linux as `logrok_agent_input_udp_kernel_drops_total{input="<name>"}` (for `gelf_in` as well). If that counter rises, use
+`udp_listeners: auto` (Linux, FreeBSD) to read the port on several cores; datagrams are spread over them even
+when they all come from one sender, and the order of messages across listeners is then not kept. TCP or TLS
+keeps order and loses nothing, where the sender supports it.
+
+**Framing to syslog-ng receivers:** syslog-ng `syslog()` sources, including appliance RFC 5424 ports (601) and
+RFC 5425/6587 listeners, expect `framing: octet-counting`. With the default `newline` framing such a receiver
+accepts the connection and reports no error, and nothing arrives. Use `newline` only for `network()`-style
+receivers. The agent warns at startup, and `-check-config` lists a warning, when an endpoint's port is 601 or 6587 with `newline` framing.
+
+**Forwarding to more than one destination is Apex.** Two or more outputs, or a `when:` condition on any output,
+is multi-destination fan-out. Without a licence that covers it, the agent keeps the first output, removes the
+others and keeps running: startup logs `multi-destination fan-out disabled — kept output "<name>"`, and the
+heartbeat reports the licence posture as degraded. `-self-check -config <file>` lists it too, under `warnings`
+in its JSON verdict, so you can see what the licence will switch off before you start the agent. Two outputs of the same type each need their own `name:`; `-check-config` refuses a
+duplicate.
+
 ### OT gateway — syslog + SNMP traps + MQTT + Modbus from one box
 
 The full OT collection point: one agent on a gateway (industrial PC, Raspberry Pi) receives
@@ -595,7 +630,7 @@ inputs:
   - type: snmptrap_in
     listen: "0.0.0.0:1162"        # port 162 needs CAP_NET_BIND_SERVICE; 1162 + a firewall redirect works unprivileged
     versions: [v2c, v3]
-    community: [otfloor]           # v2c allow-list (plaintext on the wire — prefer v3 where devices support it)
+    community: [otfloor]           # v2c allow-list (plaintext on the wire — prefer v3); ["*"] = accept any, deliberately
     v3_users:
       - username: otuser
         auth_protocol: sha256
@@ -737,7 +772,67 @@ When the spool hits `max_bytes`, `buffer.when_full` decides what gives:
 - `block` — **apply backpressure to the inputs instead of dropping** (zero loss; the source slows/stops until
   space frees). Watch `logrok_agent_backpressure_waits_total` to see it engage.
 
+If the spool shares a disk with anything that matters, set `buffer.min_free_bytes` as well: the spool then
+never takes the disk below that much free space, however long the outage, and `when_full` decides what
+gives in the same way. To cap the agent's memory and CPU on the host, see
+[`limits`](CONFIGURATION.md#limits).
+
 The on-disk spool is CRC-checked: a torn or corrupted record is skipped on replay rather than stalling delivery.
+
+<a id="restart-resume"></a>
+### Restarts — inputs resume where they stopped
+
+File and journal inputs save their read position, **by default**, and pick up where they stopped after a
+restart, a crash or an upgrade: `filetail`, `journald`, `oslog` and `linux_audit` (file mode). With
+`start_at: end` / `read_from: end`, what was written while the agent was down is delivered, not skipped. A
+position only moves past an event once the pipeline holds it durably, so a crash re-sends a short tail at
+worst, never loses one.
+
+The positions live in `positions/` beside `management.state_path` — under the service's state directory
+with the packaged Linux service, the FreeBSD rc script and the container image, else next to the
+configuration file — one file per input, named after the input's `name` (or, unnamed, after what it reads),
+so reordering inputs is safe. **Give each input a `name`** if you expect to edit its paths or filters
+and want it to keep its place. To turn saving off for one input, set its option (`state_path`,
+`cursor_file`, `checkpoint_file`) to `""`; to put the file somewhere else, set it to a path.
+`windows_eventlog` keeps its bookmarks where it always did.
+
+**After upgrading to this release**, an input with no position option has nothing saved yet, so its first
+start still follows `start_at` / `read_from`; it resumes on every restart after that. Make sure the state
+directory (or, without one, the configuration directory) is writable by the agent — otherwise the agent
+keeps collecting and logs a warning that the position cannot be saved; `-check-config` and startup
+report it up front. Full rules:
+[Saved read positions](CONFIGURATION.md#saved-read-positions).
+
+<a id="enroll-walkthrough"></a>
+### Enrolling an agent
+
+Enrolling puts a host under central management: it registers once with the control plane, then heartbeats so
+it shows up on the control plane's Agents page and can be configured and upgraded from there. The normal path
+is an online exchange at first start.
+
+1. **Create a one-time enrollment token** in the control plane, for the tenant the host belongs to.
+2. **Point the agent at the control plane** in its `management` block:
+   ```yaml
+   management:
+     endpoint: https://your-control-plane.example
+     enrollment_token: "«one-time-token»"
+     tenant_slug: "your-tenant"
+   ```
+   Use HTTPS — the credentials it exchanges are bearer secrets. (No URL to hard-code? Set `endpoint: auto` to
+   discover one on the local network segment; the token still proves the control plane, so a rogue advertiser
+   is ignored.)
+3. **Start the agent.** At first start it exchanges the one-time token for a permanent `agent_id` and
+   `api_key`, which persist in the state file (`state_path`, mode `0600`) — secrets never live in the config
+   file. The exchange retries with backoff and **log collection runs regardless**, so a briefly-unreachable
+   control plane costs no events.
+4. **The host appears on the Agents page** within one heartbeat (default every 30s), reporting its hostname,
+   platform, version and running-config version. From there you manage its configuration and, with
+   `remote_upgrade` left on, its version.
+5. **Remove the token** from the config once enrolled — the persisted credentials authenticate from then on.
+
+To harden the channel with a per-agent client certificate, set `tls.mode: enrolled`: the control plane issues
+and auto-renews the certificate, and the private key is generated on the host and never leaves it. For a host
+with no path to the control plane at install time, use an offline bundle instead — see below.
 
 ### Enrolling an agent with no path to the control plane (bundles)
 
@@ -769,7 +864,38 @@ Three things to know before you rely on it:
   windows in days, not minutes.
 - **A bundle is a bearer credential** — it contains the agent's API key when one is issued. Treat
   the stick like a key, keep the file `0600`, and prefer per-site bundles over one fleet-wide file.
+  To carry it on removable media, keep it in an encrypted vault — for example
+  [Cypherrum](https://cypherrum.com) (local-first AES-256-GCM vault encryption, mounted as a drive, no
+  cloud required; Windows, macOS and Linux). Where your security policy mandates a specific certified
+  device or product for transfer media, use that.
 
+### Signing configurations
+
+To make sure agents apply only configurations you approved — even if the control plane or the path to it
+is compromised — sign them with a key the control plane never holds:
+
+```sh
+logrok-universal-agent -gen-config-signing-key /secure/config-signing.key   # prints ed25519:… (the public key)
+logrok-universal-agent -sign-config agent.yaml -signing-key /secure/config-signing.key   # prints the signature
+```
+
+Pin the printed public key on each agent, in its local configuration:
+
+```yaml
+management:
+  config_signing_keys: ["ed25519:…"]
+```
+
+From then on the agent applies a pulled configuration only when it arrives with a signature by a pinned key
+over its exact text; anything else is refused and reported, and the agent keeps running its current
+configuration. Keep the private key off agents and off the control plane. Every configuration you sign must
+itself keep `config_signing_keys` (it may list new keys to rotate them): a signed configuration that drops
+them is refused, so switching enforcement off is only possible locally on the host. This needs a control plane that
+stores the signature with the configuration and serves it on pull. On logrok, both an individual agent's
+configuration and a group profile can be signed; a profile assigned without a signature is refused by
+agents that pin keys.
+
+<a id="central-config"></a>
 ### What the control plane can see of your configuration
 
 With `management.report_config` on (the default) each heartbeat carries a hash of the running
@@ -815,6 +941,24 @@ Two properties keep this safe rather than clever:
 
 If nothing is advertising, the agent logs that plainly and runs unmanaged for that run — collection
 keeps working; only management is absent.
+
+### Encrypting the spool at rest
+
+The tamper-evident chain proves the spool was not modified; it does not hide what is in it. On hosts where
+the disk may leave your control — field devices, laptops, cloud volumes — set `buffer.encrypt: true`. Every
+new record is then encrypted with AES-256-GCM, a FIPS 140-3 approved algorithm, under a key kept outside the
+spool directory (`buffer.encryption_key_file`, by default `spool-encryption.key` beside the chain key). A copy of
+the spool alone reveals no event content; record counts and file sizes remain visible.
+
+- **Back up the key.** Without it encrypted records cannot be delivered. If the key goes missing or is
+  replaced, the agent keeps the records, pauses delivery from the spool and logs `delivery paused — cannot
+  decrypt spooled records`, and reports `spool_decrypt_stalled` above 0, until the key is back; it never discards
+  them. A record modified after it was written is delivered as a placeholder flagged `spool_tamper` and
+  `spool_decrypt_failed` instead.
+- `-verify-spool` and spool export work on an encrypted spool without the encryption key: the tamper chain
+  covers the encrypted records.
+- Turning encryption off writes new records in clear and still reads the encrypted ones while the key file
+  is present.
 
 ### Auditing the spool
 
@@ -1129,6 +1273,17 @@ outputs:
 drop counter) — it is not spooled anywhere. Keep a condition-free catch-all destination if every event
 must land somewhere. Routing requires the same Apex entitlement as fan-out; a degraded agent clears
 `when:` conditions with a loud warning instead of silently filtering your collection.
+
+**Use a disk spool with routing.** An input saves its read position only past events that every output has
+finished with. While one routed output is down with only the in-memory spool, events sent elsewhere wait behind
+the ones that output holds in memory — up to 65,536 of them. Past that, the output's `when_full` decides. With
+`when_full: block` the agent slows intake until the output catches up instead of moving the position early, so
+nothing is lost (`output_<name>_backpressure_waits_total` climbs while it waits). With a drop policy
+(`drop_oldest`, the default, or `drop_newest`) the position moves on early, the agent logs a warning, and
+`output_<name>_held_commit_overflow_total` counts each such event; a crash or restart during the outage can then
+lose events still only in that output's memory. Turn on the disk spool (`buffer.enabled: true`) when you route,
+and nothing has to wait.
+
 Full reference: [`outputs`](CONFIGURATION.md#outputs).
 
 ### Primary and secondary collectors
@@ -1149,7 +1304,7 @@ outputs:
 ```
 
 The spool still exists — it takes over only when **every** endpoint is down. Watch
-`output_siem_active_endpoint` (0 = primary) and `output_siem_failovers_total`; a switch is also one WARN
+`output_siem_active_endpoint` (0 = primary) and `output_siem_failovers_total` in the heartbeat metrics (on `/metrics`: `logrok_agent_output_active_endpoint{output="siem"}` and `logrok_agent_output_failovers_total{output="siem"}`); a switch is also one WARN
 log line naming both endpoints. Failback happens between batches, never inside one; a batch that failed
 part-way is resent whole on the next endpoint, so both collectors may see it — the same bounded-duplicate
 behaviour a spool retry has always had. This is the syslog and Snare outputs only (TCP/TLS); the other
@@ -1229,8 +1384,123 @@ same tradeoff as every other output's reliability story. On a slow indexer, rais
 leaving it tight: a too-low timeout turns ordinary indexing latency into a stream of duplicate resends
 instead of protecting anything.
 
+**Distant or slow Splunk: `max_in_flight`.** The agent normally sends one batch and waits for Splunk's
+answer before sending the next, so a receiver with a long round trip (another region, a busy indexer,
+`use_ack` with a slow indexing acknowledgment) limits throughput to one batch per round trip. If the agent
+falls behind such a receiver, set `max_in_flight: 4` (up to `64`) on the `hec` output to keep several
+batches on the way at once. Splunk may then receive batches out of order — each event keeps its own
+timestamp — while inputs still advance in read order and delivery stays at-least-once. A failed batch is
+spooled before anything after it is acknowledged, and the agent then sends one batch at a time behind it.
+Leave it at the default `1` for a nearby, fast receiver.
+
 **When to use `hec` vs. `otlp`:** reach for `hec` when the receiver is Splunk itself; reach for `otlp`
 when the destination is an OpenTelemetry Collector or another OTLP-native backend.
+
+**One output, many indexes.** An input's `add_fields` can set `splunk.index`, `splunk.sourcetype`,
+`splunk.source` and `splunk.host`; the `hec` output uses them per event (ahead of its own `index` /
+`sourcetype` / `source`) and never sends them as indexed fields. `source_style: splunk` sends a file's
+bare path as `source`, as a Splunk forwarder does.
+
+### Migrating from another forwarder (`luna-migrate`)
+
+`luna-migrate` — a separate small tool published with every release beside the agent
+(`luna-migrate-<os>-<arch>`; the agent binary carries no converter) — converts another forwarder's
+configuration into an agent configuration and prints a report of everything it could not carry over
+(`manual` / `warning` / `info` / `skipped`; `-report` writes it as JSON):
+
+```bash
+luna-migrate splunk /opt/splunkforwarder -out agent.yaml      # Splunk Universal Forwarder
+luna-migrate beats /etc/filebeat/filebeat.yml -out agent.yaml # Filebeat or Winlogbeat
+luna-migrate nxlog /etc/nxlog/nxlog.conf -out agent.yaml      # NXLog
+luna-migrate fluentbit /etc/fluent-bit/fluent-bit.conf -out agent.yaml  # Fluent Bit (classic or YAML)
+luna-migrate promtail /etc/promtail/config.yml -out agent.yaml          # Grafana Promtail
+luna-migrate otelcol /etc/otelcol-contrib/config.yaml -out agent.yaml   # OpenTelemetry Collector (logs pipelines)
+luna-migrate syslog-ng /etc/syslog-ng/syslog-ng.conf -out agent.yaml     # syslog-ng OSE (@include followed)
+luna-migrate vector /etc/vector/vector.yaml -out agent.yaml               # Vector (YAML, TOML or JSON; a config directory too)
+luna-migrate rsyslog /etc/rsyslog.conf -out agent.yaml                  # rsyslog (RainerScript, legacy directives, selectors; includes followed)
+luna-migrate logstash /etc/logstash/conf.d -out agent.yaml               # Logstash (a .conf, conf.d or pipelines.yml)
+luna-migrate fluentd /etc/fluent/fluentd.conf -out agent.yaml          # Fluentd / td-agent / fluent-package (@include followed)
+luna-migrate azure-dcr ./my-dcr.json -out agent.yaml   # Azure Monitor Agent data collection rule (JSON export)
+luna-migrate datadog /etc/datadog-agent -out agent.yaml -target syslog -syslog-endpoint siem:6514   # Datadog Agent (log collection)
+luna-migrate wazuh /var/ossec/etc -out agent.yaml -syslog-endpoint siem:6514   # Wazuh / OSSEC agent (log collection; ossec.conf + shared agent.conf)
+luna-migrate elastic-agent /etc/elastic-agent/elastic-agent.yml -out agent.yaml   # standalone Elastic Agent (inputs.d followed)
+luna-migrate graylog /var/lib/graylog-sidecar/generated -out agent.yaml   # Graylog Sidecar (its generated collector configs)
+```
+
+luna-migrate checks the configuration's structure, then runs the installed agent's `-check-config` (found beside `luna-migrate` or on the `PATH`, or named with `-agent`), which builds every module exactly as that agent version would; a configuration the agent rejects is removed. Without an agent to hand it says so — then run `logrok-universal-agent -check-config -config agent.yaml` on the target host. Credentials are never copied: the file holds `REPLACE_WITH_…` placeholders the report lists.
+
+Options beyond `-out`, `-report`, `-target`, `-syslog-endpoint`, `-start-at` and `-agent` (an option that does not apply to the chosen source is refused, never ignored):
+
+| Option | Applies to | Meaning |
+|---|---|---|
+| `-syslog-plain` | every source | the syslog output uses plain TCP instead of TLS |
+| `-windows` / `-linux` | every source | convert for a Windows or a Unix host when it cannot be told from the configuration (an Azure data collection rule without a kind, for example); give at most one |
+| `-agent-conf FILE` | `wazuh` only | an extra shared `agent.conf` (repeatable, or comma-separated) |
+| `-os NAME`, `-profile NAME`, `-agent-name NAME` | `wazuh` only | this host's identity for choosing the `<agent_config>` blocks that apply |
+| `-finding-summary FILE` | every source | also write an anonymised summary of what the conversion could not carry over (see below); an existing file is never overwritten |
+
+#### Telling us what your configuration used
+
+If a conversion lists constructs under `manual` or `warning`, the settings real configurations use are what we convert next. `-finding-summary summary.json` writes a small JSON file you can send us for that, and nothing else:
+
+- the source and the `luna-migrate` version, the source's own stated version when its file carries one, and the versions the converter was verified against;
+- how many inputs and destinations of each agent module type the conversion produced;
+- for each setting name the converter reported on: its severity (`manual`, `warning`, `info`, `skipped`) and how many times it occurred.
+
+It never contains a value, a path, a host name or address, a file name, a secret, the name of a stanza, pipeline, route or destination you chose, or the text of a report message. A setting name is included only if it looks like a product's own setting name; one that does not (it contains a slash, an `@`, a space, many digits, a host-name ending, or is a long unbroken token) is counted in `withheld` without its text. The check is mechanical, so **open the file and read it before you send it** — it is a few dozen lines. Sending it is entirely optional; `luna-migrate` never sends anything itself.
+
+```json
+{
+  "schema": "luna-migrate-finding-summary/1",
+  "tool_version": "v1.7.0",
+  "source": "syslog-ng",
+  "inputs": { "file": 4, "syslog_in": 1 },
+  "outputs": { "syslog": 1 },
+  "findings": [ { "severity": "manual", "directive": "flags", "count": 3 } ],
+  "withheld": { "manual": 1 }
+}
+```
+
+Per-source guides: [Splunk Universal Forwarder](migration/from-splunk-uf.md) ·
+[Filebeat](migration/from-filebeat.md) · [Winlogbeat](migration/from-winlogbeat.md) ·
+[NXLog](migration/from-nxlog.md) · [Fluent Bit](migration/from-fluent-bit.md) · [Promtail](migration/from-promtail.md) ·
+[OpenTelemetry Collector](migration/from-otel-collector.md) · [syslog-ng](migration/from-syslog-ng.md) · [Vector](migration/from-vector.md) · [rsyslog](migration/from-rsyslog.md) · [Logstash](migration/from-logstash.md) · [Fluentd](migration/from-fluentd.md) · [Azure Monitor Agent](migration/from-azure-monitor-agent.md) · [Datadog Agent](migration/from-datadog-agent.md) · [Wazuh / OSSEC](migration/from-wazuh.md) · [Elastic Agent](migration/from-elastic-agent.md) · [Graylog Sidecar](migration/from-graylog-sidecar.md).
+
+#### Getting `luna-migrate`
+
+`luna-migrate` is published with every agent release, on the same download page, as one file per platform:
+
+| Platform | Release asset | Save it as |
+|---|---|---|
+| Linux x86-64 / ARM64 | `luna-migrate-linux-amd64` / `luna-migrate-linux-arm64` | `luna-migrate` (then `chmod +x luna-migrate`) |
+| Windows x64 / ARM64 | `luna-migrate-windows-amd64.exe` / `luna-migrate-windows-arm64.exe` | `luna-migrate.exe` |
+| macOS Intel / Apple silicon | `luna-migrate-darwin-amd64` / `luna-migrate-darwin-arm64` | `luna-migrate` (then `chmod +x luna-migrate`) |
+
+Verify the download against the release's `SHA256SUMS` like the agent itself. Renaming is only for
+convenience — the tool works under any file name. Put it in the agent's installation directory (or
+anywhere, and pass `-agent <path to the agent>`) so it can validate its output with that agent. It needs no
+installation, writes nothing but the files you name, and can be deleted after the migration.
+
+### Replacing a Splunk Universal Forwarder
+
+`luna-migrate splunk <forwarder home> -out agent.yaml` reads the forwarder's
+own `inputs.conf` / `outputs.conf` (with Splunk's file precedence) and writes an agent configuration that
+keeps sending to the same Splunk over HEC with the same index, sourcetype, source and host per event, or,
+with `-target syslog`, to logrok or any syslog receiver. It prints a report of everything it could
+not carry over and validates the result (above). Fill in the HEC token
+(`REPLACE_WITH_HEC_TOKEN`), start the agent, confirm the data in Splunk, then stop the forwarder. The full
+walkthrough, the mapping table and the cut-over order are in
+[Migrating from the Splunk Universal Forwarder](migration/from-splunk-uf.md).
+
+### Replacing Filebeat or Winlogbeat
+
+`luna-migrate beats filebeat.yml -out agent.yaml` (or `winlogbeat.yml` — the kind
+is read from the file) converts a Beat's inputs, fields, tags, line filters, event-log filters and output
+(Logstash, Elasticsearch or Kafka; or `-target syslog`) into an agent configuration, with the same
+report and the same validation as the Splunk converter. Credentials are never copied: the file holds
+`REPLACE_WITH_…` placeholders. Filebeat modules, ingest pipelines and scripted processors are reported, not
+converted. Cut over by starting the agent (new data only), checking delivery, then stopping the Beat. See
+[Migrating from Filebeat](migration/from-filebeat.md) and [Migrating from Winlogbeat](migration/from-winlogbeat.md).
 
 ### Forwarding to Grafana Loki
 
@@ -1275,6 +1545,39 @@ A ready-to-copy preset with every option commented, including the Grafana Cloud 
 
 **When to use `loki` vs. `otlp`:** reach for `loki` when the destination is Loki itself; `otlp` when it is an
 OpenTelemetry Collector that then fans out.
+
+### Forwarding to Logstash or Graylog (Beats protocol)
+
+Where Logstash (or Graylog's Beats input) is already the collection tier, the agent can stand in for a Beat:
+
+```yaml
+outputs:
+  - type: beats
+    endpoint: "logstash.example:5044"
+    endpoints: ["logstash2.example:5044"]   # optional failover
+```
+
+A batch counts as delivered only when the receiver has acknowledged all of it, so a Logstash restart costs a
+retry, not events. Logstash sees ECS-shaped documents (`[host][name]`, `[log][level]`, your fields as nested
+objects). See [the reference](CONFIGURATION.md#beats).
+
+### Forwarding to Elasticsearch or OpenSearch
+
+Use the `elasticsearch` output to index events directly into an **Elasticsearch** or **OpenSearch** cluster —
+no Logstash in between. It uses the bulk API, so the same configuration works on either:
+
+```yaml
+outputs:
+  - type: elasticsearch
+    endpoints: ["https://es1.example:9200", "https://es2.example:9200"]
+    index: logs-edge-prod          # default logs-luna-default — a data stream on Elasticsearch
+    api_key: "REPLACE_WITH_ES_API_KEY"       # or username / password
+```
+
+Documents follow the Elastic Common Schema (`@timestamp`, `message`, `host.name`, `log.syslog.*`, with your
+fields under `labels`). A throttled cluster costs no duplicates: only the documents that were refused are
+retried. Documents the cluster can never index (a mapping conflict) are dead-lettered with
+`dead_letter_dir`, or dropped and counted. See [the reference](CONFIGURATION.md#elasticsearch).
 
 ### Forwarding to Kafka
 
@@ -1384,14 +1687,14 @@ format doesn't match `encoding` — fix either side and the backlog delivers. Fu
 
 **Noise decided centrally, removed at the source.** When your platform classifies a log template as noise,
 the `noise_fingerprint` processor enforces that decision on the host: it computes the same template
-fingerprint the platform computes at ingest (identifiers, addresses and numbers masked, then hashed) and
+fingerprint the platform computes at ingest (identifiers, addresses, paths, e-mail addresses and numbers masked, then hashed; the legacy fingerprint of older platform versions matches too) and
 drops or marks every event whose fingerprint is in its set — one hash lookup per event, so thousands of
 templates cost the same as one. A managed configuration can carry the set today; the platform filling it in
 automatically follows on its side. By default events of severity err and worse always pass. Put it first in
 the processors list, before anything that rewrites the message, and note it cannot match on a Snare
 destination or a syslog destination with `encoding: json` (those rewrite the message before it is sent).
 
-The `sample`, `throttle`, `dedup`, `trim_fields`, and `quota` processors cut log volume **before it leaves the host**,
+The `sample`, `throttle`, `dedup`, `trim_fields`, `quota` and `aggregate` processors cut log volume **before it leaves the host**,
 reducing SIEM ingest costs without losing security-critical signal.
 
 **Safety rule — always use `keep_min_severity` and/or `keep_if`:**
@@ -1620,13 +1923,58 @@ Three behaviours worth knowing:
   table that is briefly unreadable (mid-rewrite) keeps the copy in memory. A table that cannot be read at
   *startup* is a configuration error, because a lookup enriching nothing should fail loudly.
 
+### Tuning throughput — batch size first, then processor workers
+
+Two settings under `service:` decide how fast one agent moves events. Change one at a time and watch
+`logrok_agent_events_in_total` / `..._events_out_total` and the agent's CPU.
+
+1. **`batch_size`** — each destination has one write in flight at a time, so against a receiver with a
+   noticeable round trip the batch size sets the ceiling. Raise it first when the receiver is far away or
+   slow to answer (see [`batch_size`](CONFIGURATION.md#service)).
+2. **`workers`** — when the agent's processors are what holds it back (the agent uses about one core
+   flat out while the receiver keeps up), `workers: 4` or `8` spreads them over several cores. The
+   processors that are safe to run concurrently (`add_fields`, `filter`, `expr`, the `parse_*` set,
+   `redact`, `trim_fields`, `lookup`, `file_hash`, `noise_fingerprint`, keyed `sample`) run on the
+   workers; `dedup`, `throttle`, `quota`, unkeyed `sample`, `adaptive_sample` and `aggregate` keep running
+   in arrival order, so their results are the same as with one worker. Sending also overlaps with
+   processing.
+
+```yaml
+service:
+  batch_size: 1024
+  workers: 8
+processors:
+  - type: parse_kv          # parallel-safe processors first ...
+  - type: redact
+    patterns: [ipv4, email]
+  - type: noise_fingerprint
+  - type: dedup             # ... order-dependent ones after them
+    keep_min_severity: 3
+```
+
+**Put the parallel-safe processors first.** Only the leading run of them goes to the workers; the first
+processor that must see events in order, and everything after it, runs on one worker. At start-up the
+agent logs the split (`parallel_prefix` and `serial_processors`) and warns when nothing can run in
+parallel. Delivery order, batch contents and when an input saves its position are the same as with
+`workers: 1`. The default stays `1`, the single-loop pipeline of earlier releases. **4–8 is the
+practical range; more workers than CPUs gives no gain** — a value above the CPUs the agent may use (or
+above `limits.max_procs`) is applied as written and logs a warning.
+
+On stop, queued work gets the same shutdown grace as with one worker (`service.shutdown_grace`, default
+`15s`, range `1s`–`10m`; raise it for a slow receiver, and keep the service manager's stop timeout at least as long); what is not delivered by
+then is left for the input to read again after the restart (a replay-capable input such as a file or
+the journal sends it again; nothing is marked as sent that was not). An input that cannot be replayed
+(a network receiver such as `syslog_in`) loses that last unshipped batch.
+
 ## Network appliances (pfSense, OPNsense) and FreeBSD
 
 pfSense and OPNsense are FreeBSD underneath, and firewall/VPN logs are among the highest-value security
 telemetry on a network — so the agent runs on the appliance itself rather than you pointing its syslog at
 something and hoping. The documentation bundle ships `deploy/freebsd/logrok-universal-agent.rc`, an `rc.d` service with the same
 posture as the systemd unit: supervised restart, unprivileged run-as user, and a private state directory.
-It is verified on real FreeBSD — start, status, stop, and restart-after-crash.
+It is verified on real FreeBSD (15.1) — start, status, stop, and restart-after-crash. pfSense and OPNsense are
+FreeBSD-based but have **not yet been verified on the appliance itself**; their package and configuration
+managers may differ, so test on a non-production unit first.
 
 ```sh
 # 1. the binary
@@ -1849,13 +2197,32 @@ standard-crypto build. It is the same agent — same version, same features, sam
 cryptographic module unpinned. Set `service.fips_mode: disabled` on those hosts so deploying the wrong
 artifact there fails at startup instead of at the first delivery.
 
-### Known limitation — SNMPv3 privacy
+### Known limitation — SNMPv3 and non-approved algorithms
 
-`snmptrap_in` decrypts SNMPv3 USM privacy using **CFB mode**, which the specification requires (RFC 3826)
-and which is not among the FIPS-approved modes. In a FIPS build the module runs in FIPS 140-3 mode while
-still permitting that operation, so **SNMPv3 traps keep working** — but if your obligation is that *only*
-approved algorithms are used anywhere in the process, do not enable SNMPv3 privacy on a FIPS deployment.
-SNMPv1/v2c and SNMPv3 without privacy are unaffected, as is every other input and output.
+SNMPv3 (USM) depends on algorithms that are not FIPS-approved:
+
+- **Privacy** is **CFB mode** for every protocol (`aes`, `aes192`, `aes256`, `aes192c`, `aes256c`, `des`), which the
+  specification requires (RFC 3826) and which is not among the approved modes.
+- **MD5 authentication** (`auth_protocol: md5`) and **DES privacy** (`priv_protocol: des`) are not approved at all
+  (NIST SP 800-131A Rev. 2). Only SHA-based authentication (`sha`, `sha224`, `sha256`, `sha384`, `sha512`)
+  is approved, so **authNoPriv with SHA-2 is the only fully approved SNMPv3 configuration**.
+
+In a FIPS build in production mode (`fips140=on`) the module still permits these operations, so SNMPv3 traps keep
+working — but if your obligation is that *only* approved algorithms are used anywhere in the process, use
+`sha256` or stronger without privacy, or do not enable SNMPv3 on that deployment. Under the strict testing mode
+`GODEBUG=fips140=only` Go panics on MD5 and CFB; the agent therefore refuses such a user at startup with a clear
+error instead of failing at the first trap. SNMPv1/v2c are unaffected by this section (their community string
+is plaintext on the wire, which is its own reason to prefer v3), as is every other input and output.
+
+**Legacy devices (MD5 / DES).** Many older switches and UPSes can only do MD5/DES. Collect them deliberately by
+setting `allow_legacy_crypto: true` on that user; the agent logs it at startup and reports the number of such
+users as the `snmptrap_legacy_crypto_users` gauge (also in every heartbeat), so a fleet shows which hosts accept
+non-approved crypto. In this release a user with md5/des **and no flag** is still accepted (so existing
+configurations keep working) but logs a warning at every start; that will be refused from the next minor release.
+
+**AES-192/256 and Cisco.** `aes192` / `aes256` use the Blumenthal key extension (net-snmp and most devices).
+Cisco devices use the Reeder extension: configure `aes192c` / `aes256c` for them. The difference only matters
+with SHA-1 or SHA-224 authentication; with SHA-256 or stronger both are identical.
 
 ## Securing the link (TLS / mTLS)
 
@@ -1876,9 +2243,26 @@ Mutual TLS (the aggregator also verifies the agent) — `cert_file` and `key_fil
 Server verification is **on by default** when `tls: true`. `insecure_skip_verify: true` disables it and is for
 **development only** — never in production.
 
-> **mTLS misconfiguration warning:** if the aggregator *requires* a client certificate and the agent isn't
-> configured with one, TLS 1.3 receivers (syslog-ng `peer-verify(required-trusted)` included) accept the
-> handshake and then drop the connection **silently**. The agent health-probes every freshly dialed
+`cert_file` should hold the full chain — the agent's certificate followed by any intermediate CA
+certificates. A receiver lists the CAs it trusts (usually the root); with only the leaf in the file, the
+agent cannot match it to that list and presents no certificate at all.
+
+A client certificate you provide yourself should either carry the **TLS Web Client Authentication**
+extended key usage (`clientAuth`) or no extended key usage at all. Receivers that check key usage —
+including logrok's — refuse a certificate restricted to server authentication. Certificates the control
+plane issues in enrolled mode (`tls.mode: enrolled`, `cert_source: enrolled`) always carry `clientAuth`. The
+agent warns at startup when a certificate you configured would be refused this way, and
+`-check-config` reports it under `warnings` (the configuration still loads — receivers that don't check
+key usage accept it).
+
+> **mTLS misconfiguration warning:** under TLS 1.3 a receiver judges the agent's client certificate only
+> *after* the agent's side of the handshake has finished, so a refused certificate (missing, untrusted chain,
+> wrong key usage) does not fail the handshake itself. When the receiver asks for a client certificate, the
+> agent therefore waits — up to 2 seconds, or until the receiver issues its TLS session ticket, which servers
+> such as syslog-ng and logrok send only after accepting the certificate — before handing the connection a
+> batch; a refusal in that window fails the connection, so the batch stays spooled and is retried. Receivers
+> that issue no session tickets and refuse more slowly than that window, and receivers that *require* a
+> certificate the agent does not present at all, can still drop the connection **silently**. The agent health-probes every freshly dialed
 > connection (TLS and plain TCP) before handing it a batch, so most misconfig cases like this now surface
 > as a connection error and the batch is spooled + retried, rather than vanishing. That probe narrows the
 > window but cannot close it — classic syslog has no delivery acknowledgement, so a receiver that rejects
@@ -1976,8 +2360,24 @@ can never leave an agent on an old entitlement: the control plane re-sends until
   backlog starts draining and falls as the spool empties; a value that is large while `buffer_depth` is 0
   points at the source's clock, not at the agent — use `buffer_depth` for the outage itself),
   `pipeline_latency_seconds` (how long the agent itself held events; at most around your batch timeout when
-  healthy; under load batches fill by size and it is far lower), `processor_reduction_ratio` (the share of
-  received events your processors removed — the number behind "reduce at the edge").
+  healthy; under load batches fill by size and it is far lower), `pipeline_stage_busy_seconds_total{stage}` (with
+  `service.workers` above 1: the stage whose busy seconds keep pace with wall-clock time is what limits
+  throughput — if it is `ship`, more workers will not help, raise `batch_size` instead; `pipeline_workers` and
+  `pipeline_parallel_prefix` show how many workers run and how many leading processors they cover),
+  `pipeline_hop_busy_seconds_total{hop}` with `pipeline_hop_events_total{hop}` (per hop of the path — each stage,
+  each destination's delivery `dest:<name>`, its spool writes `spool:<name>` and spool drain `drain:<name>`, and an input's own reading `input:<name>` for the syslog receiver's TCP and TLS streams:
+  events ÷ busy seconds is the rate that hop could reach if it never waited, and the hop with the lowest rate is
+  what limits throughput; `pipeline_hop_wait_in_seconds_total` says a hop is starved by the one before it,
+  `pipeline_hop_wait_out_seconds_total` that it is held back by the one after it), `processor_reduction_ratio` (the share of
+  received events your processors removed — the number behind "reduce at the edge"),
+  `processor_<name>_overflow_total` (events `aggregate` had to pass through un-aggregated because
+  `max_groups` was reached — raise the cap or narrow `group_by`; the agent also logs one WARN the first time),
+  `events_dropped_by_reason_total{reason=…}` (why events were lost — `output_rejected`, `spool_full`,
+  `disk_low`, `no_spool`, `spool_withdrawn`, `shutdown` or `input_overflow`; the reasons add up to
+  `events_dropped_total`),
+  `oldest_unsent_age_seconds` (how long the oldest spooled event has been waiting; keeps growing while a
+  destination is down, back to 0 once spools are empty — alert on it to catch an outage before the spool
+  fills).
 - **Fleet telemetry (managed mode):** a centrally managed agent also reports the same signals to the control
   plane on every heartbeat as a self-describing metrics map, plus process telemetry — uptime, cumulative CPU
   seconds, and resident memory (memory on Linux and Windows; a metric that is unavailable on a platform is
@@ -2001,8 +2401,8 @@ The agent has a free **Core** tier (file tail, syslog/journald/HTTP inputs, pars
 syslog output, metrics — no license needed, at any scale) and a paid **Apex** tier for
 everything else. The line: **Core collects from the host and forwards one open standard —
 RFC 5424 syslog over TCP/TLS — to one destination.** Anything that reads a privileged or
-proprietary OS subsystem (Windows Event Log, ETW, WMI, `linux_audit`, `oslog`, `bsm_audit`), speaks a
-named vendor or platform API (`hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`,
+proprietary OS subsystem (Windows Event Log, ETW, WMI, `linux_audit`, `oslog`, `bsm_audit`), receives from a gateway protocol or message bus (`gelf_in`, `openwec_in`, `beats_in`, `fluent_in`, `otlp_in`, `hec_in`, `mqtt_in`), speaks a
+named vendor or platform API (`hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`, `elasticsearch`, `beats`, `fluent`,
 `snare`), or adds fleet-scale machinery (disk spool, fleet management, edge reduction,
 enrolled mTLS, relay, Kubernetes container logs, UDP/data-diode output, fan-out, extended
 OS platforms, OT ingest — `snmptrap_in`, `modbus_in` — file-content hashing, `file_hash`, and noise enforcement at the source, `noise_fingerprint`) is Apex. TLS is never gated. Full model, license-file format, and state
@@ -2060,6 +2460,121 @@ them and are not modified.
 If your organisation reviews open-source obligations before deployment, `THIRD-PARTY-NOTICES.md` and
 that archive are what to hand them. Anything missing: `security@logiqum.com`.
 
+## Agentless Windows hosts via OpenWEC
+
+Windows can forward its own event logs — Windows Event Forwarding, configured by Group Policy — without any agent
+installed. [OpenWEC](https://github.com/cea-sec/openwec), an open-source collector for Linux, receives that
+forwarding; the agent's `openwec_in` input takes OpenWEC's output and sends the events on like any other (Apex):
+
+```yaml
+inputs:
+  - type: openwec_in
+    socket: /run/openwec/agent.sock
+    socket_mode: "0660"     # OpenWEC's user must be in the agent's group
+```
+
+In the OpenWEC subscription, add an output with `driver = "UnixDatagram"`, `format = "RawJson"` and that path, and
+set `content_format = "RenderedText"` so the Windows hosts send their rendered messages. Each event arrives with
+the same fields as from an agent on that host, its host name is the forwarding machine's, and `wef_principal` /
+`wef_source_ip` say which machine delivered it. `wef_identity: mismatch` marks an event whose claimed host is not
+the machine that sent it; `on_identity_mismatch: drop` discards those instead. If an intermediate Windows Event
+Collector forwards other hosts' events on to OpenWEC, name its principal in `trusted_forwarders`. All options:
+[CONFIGURATION — openwec_in](CONFIGURATION.md#openwec_in---cross-platform-openwec-receiver--agentless-windows-hosts--apex).
+
+Prefer the socket when OpenWEC runs on the agent's machine: while the agent is stopped, OpenWEC refuses the
+events and the Windows hosts send them again later. If OpenWEC runs elsewhere, use `listen: "0.0.0.0:5170"` with OpenWEC's `Tcp`
+driver (TLS with `tls_cert_file` / `tls_key_file`); over TCP, OpenWEC can lose the events it sends just after the
+agent stops, so restart the agent sparingly there.
+
+OpenWEC is a separate program under its own licence (GPL-3.0); install and update it from its project.
+
+## Receiving what was sent to Splunk HEC
+
+Anything configured to send to a Splunk HTTP Event Collector can send to the agent instead — point its HEC URL at
+the agent and give it one of the agent's tokens. On the agent (Apex):
+
+```yaml
+inputs:
+  - type: hec_in
+    listen: "0.0.0.0:8088"
+    tokens: ["REPLACE_WITH_HEC_TOKEN"]
+    tls_cert_file: /etc/logrok-agent/server.pem
+    tls_key_file:  /etc/logrok-agent/server.key
+```
+
+For example, Docker's logging driver: `--log-driver splunk --log-opt splunk-url=https://gateway.example.net:8088
+--log-opt splunk-token=<token>`. Each request is answered only once its events are durable, so a sender that gets
+no answer resends. `sourcetype` and `index` arrive as the fields `hec.sourcetype` and `hec.index`.
+
+## Receiving OpenTelemetry logs
+
+Applications instrumented with an OpenTelemetry SDK, and OpenTelemetry Collectors, can send their logs to the
+agent over OTLP. On the agent (Apex):
+
+```yaml
+inputs:
+  - { type: otlp_in, listen: "0.0.0.0:4317" }
+```
+
+Point the SDK's or Collector's OTLP logs exporter at `gateway.example.net:4317` — gRPC, or HTTP at
+`http://gateway.example.net:4317/v1/logs`. The agent answers each export only once the logs are durable, so a
+restart makes the exporter retry instead of losing logs. Resource attributes such as `service.name` and
+`k8s.pod.name`, log attributes and trace/span ids arrive as fields. Add `tls_cert_file` / `tls_key_file` (and
+`auth_token`, sent by the exporter as `Authorization: Bearer …`) outside a trusted network.
+
+## Receiving from Fluent Bit or Fluentd
+
+Where Fluent Bit (or Fluentd) already collects — typically as the Kubernetes log DaemonSet — the agent can be
+the gateway it forwards to. On the agent (Apex):
+
+```yaml
+inputs:
+  - { type: fluent_in, listen: "0.0.0.0:24224", shared_key: "REPLACE_WITH_SHARED_KEY" }
+```
+
+On Fluent Bit, the `forward` output points at it — keep `Require_ack_response` on, so a batch counts as sent
+only once the agent has made it durable:
+
+```
+[OUTPUT]
+    Name                  forward
+    Match                 *
+    Host                  gateway.example.net
+    Port                  24224
+    Require_ack_response  True
+    Shared_Key            <the same key>
+```
+
+Kubernetes metadata added by Fluent Bit's `kubernetes` filter arrives as fields (`kubernetes.pod_name`,
+`kubernetes.namespace_name`, `kubernetes.labels.*`); the log line itself (`log`) is the message. For TLS add
+`tls On` on Fluent Bit and `tls_cert_file` / `tls_key_file` on the input.
+
+## Receiving from Elastic Beats
+
+An existing Filebeat or Winlogbeat fleet can ship to the agent instead of Logstash — the agent then adds its
+spool, reduction, routing and any destination. On the agent (Apex):
+
+```yaml
+inputs:
+  - { type: beats_in, listen: "0.0.0.0:5044" }
+```
+
+On each Beat, only the output changes:
+
+```yaml
+output.logstash:
+  hosts: ["gateway.example.net:5044"]
+```
+
+For TLS, give the input `tls_cert_file` / `tls_key_file` and set `ssl.enabled: true` plus
+`ssl.certificate_authorities` in the Beat; add `tls_client_ca_file` to require client certificates
+(`ssl.certificate` / `ssl.key` on the Beat). Each Beat document becomes one event: `message`, `@timestamp`,
+`host.name` and `log.level` map onto the event, and everything else — `log.file.path`, `winlog.event_id`,
+`winlog.channel`, `event.code` — arrives as dotted fields. The agent acknowledges a batch only once it is durable
+(spooled or delivered), so a crash or restart makes the Beat resend rather than lose it; expect occasional
+duplicates after one. `beats_in` uses port 5044 by convention; run it on a gateway, not on hosts that already
+run Logstash.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -2067,22 +2582,29 @@ that archive are what to hand them. Anything missing: `security@logiqum.com`.
 | An input/processor/output from your config is missing after an upgrade or restart, and startup logs `licensing: degraded to Core — unlicensed Apex features disabled` | the config uses Apex capabilities without a covering license (or the license expired and its grace window ended) | install/renew the license (`licensing.license_file`, or enroll with a logrok control plane) and restart — the features come back immediately. For a controlled transition window, contact support — temporary enforcement exceptions can be arranged (see [LICENSING.md](LICENSING.md)) |
 | Startup logs `licensing: Apex features are in the grace window` with `days_left` | the license expired; the grace window is running | renew before `days_left` reaches 0 to avoid degrade-to-Core; watch `logrok_agent_license_grace_days_left` |
 | Startup logs `licensing: this config uses paid (Apex) features that your entitlement does not cover — they KEEP RUNNING for now…`, posture reads `degraded`, but **every module is still working** | the config uses one or more of the modules newly marked Apex (`etw`, `wmi`, `linux_audit`, `mqtt_in`, `redact`, `lookup`, `adaptive_sample`, or a non-syslog output). This is the notice period — reported, not enforced | nothing breaks now, but they **are** disabled at the next major version. Before then: install a license (`licensing.license_file`), enroll with a logrok control plane, or move the pipeline to Core modules. The warning names exactly which modules are affected |
+| The `syslog` output connects and `events_out` climbs, but nothing arrives at a syslog-ng `syslog()` source or an appliance RFC 5424 port, and neither side logs an error | the receiver expects RFC 6587 octet-counting framing; newline-framed messages are dropped silently | set `framing: octet-counting` on the output (newline framing is for `network()`-style receivers). Startup logs a WARN, and `-check-config` lists a warning, when the endpoint port is 601 or 6587 with `newline` framing |
+| After an upgrade, a receiver's rules that matched APP-NAME `syslog-in` (or `file:<path>`) stop matching | the `syslog` output now sends the original program as APP-NAME: a gateway forwards the sender's APP-NAME, and an `app` field (from `add_fields` or a converted configuration) becomes APP-NAME. The old value travels as the `source` structured-data parameter | match on the `source` parameter, or set `header_from_fields: false` on the output to keep the previous header |
 | `buffer_depth` rising, `events_out` flat | aggregator unreachable / TLS rejected | check `endpoint`, firewall, and the TLS material; logs show "output unavailable, buffering" |
 | Spooled events not draining after the aggregator recovered | the output's writes are still failing (stale DNS, a proxy accepting connections the backend can't service, TLS/mTLS rejection) | the agent warns `spool drain blocked` with the exact write error while the spool can't drain (first failure immediately, then every 30s) and logs `spool drain resumed` when delivery restarts — read the error in that warning; delivery retries indefinitely, nothing is dropped while spool capacity remains |
 | TLS handshake / "unknown authority" | wrong/missing `ca_file` | point `ca_file` at the CA that signed the aggregator cert |
 | Aggregator rejects the agent (mTLS) | no/!valid client cert | set `cert_file` + `key_file`; ensure the aggregator trusts your client CA |
+| A Windows agent logs `apply config: refused: config: management.state_path "/…" has no drive letter` (or another path key), and the control plane shows the configuration as refused | the configuration sent to it was written for a macOS or Linux host — its agent paths have no drive letter, so on Windows they would land on the root of the system drive | the agent keeps its running configuration. Send it the Windows host's configuration, or give those keys full paths such as `C:\ProgramData\logrok-universal-agent\…`. `-check-config` and `-self-check` give the same warning for a local file |
+| A `journald` input on a host that had a clock fault (RTC reset, far-future date) delivers nothing new, even though the journal is growing; the log says `journald: newest journal entry is future-dated; using cursor polling` or `…future-dated entry seen; switching to cursor polling` | the journal holds entries dated in the future, which stalls `journalctl --follow` (it waits by time, not by position) | nothing to do: the input switches itself to cursor polling (one `journalctl --after-cursor` run about every 2 seconds, so new entries arrive up to ~2 s late and are not lost). It returns to follow mode on the next agent restart once the future-dated entries are no longer the newest |
 | Security channel missing on Windows | not running as admin | run the service as administrator (Security needs `SeSecurityPrivilege`) |
 | The Windows service stopped with only a "terminated unexpectedly" (7034) event and no agent log | `service.log_file` is not set — a service has no console, so the structured log and any crash report went nowhere | set `service.log_file` (the MSI's default configuration since 1.5.0 does), restart, read the file. Since 1.5.0 the service also writes a panic (event 1, with its stack) or a fatal exit (event 2) to the **Application** event log under the source `logrok-universal-agent`, and configures its own restart-on-failure recovery |
 | The agent logs `control plane does not recognise this agent (deleted, or its key was replaced) — clearing identity and re-enrolling` | the agent's record was deleted on the control plane, or a reinstall of the same host enrolled first and replaced its key (HTTP 401) | nothing to do if an enrollment token is configured: the agent re-enrolls once (at most once per 10 minutes). Without a token it keeps failing visibly — add `management.enrollment_token` and restart |
 | The agent logs `control plane revoked this agent — management calls stopped for this process` and `logrok_agent_management_revoked` reads 1 | an admin revoked the agent (HTTP 403); heartbeats, configuration pulls and certificate renewals stop for this process, log collection continues and spools where the data plane also refuses | ask an admin for a **new** enrollment token (one minted after the revocation — older tokens are refused), put it in the configuration and restart the agent |
 | An agent shows `refused` or `error` under Upgrade on the Agents page | the offer did not match the host, the host opted out, or a verification step failed | the reason is in the fleet view and the agent log; see [Upgrading agents from the control plane](#upgrading-agents-from-the-control-plane) |
-| `events_dropped_total` climbing | spool hit `max_bytes` during a long outage | raise `max_bytes` or fix the link; what's dropped depends on `buffer.when_full` (default `drop_oldest`). Set `when_full: block` for zero loss (back-pressures the source instead) |
+| `events_dropped_total` climbing | read `events_dropped_by_reason_total` for which reason: `spool_full` = the spool hit `max_bytes` during a long outage; `disk_low` = the spool's disk is below `buffer.min_free_bytes`; `no_spool` = a destination is down with no spool configured; `output_rejected` = the receiver refuses the events permanently; `input_overflow` = a trap storm, ETW trace or Modbus burst outran an input's own queue (`input_<name>_queue_dropped_total` in the heartbeat metrics, or `logrok_agent_input_queue_dropped_total{input="<name>"}` on `/metrics`, names the input) | `input_overflow`: raise that input's `queue_size` (`buffer_events` for `etw`) or reduce the source rate; `spool_full`: raise `max_bytes` or fix the link — set `when_full: block` for zero loss (back-pressures the source instead); `disk_low`: free disk space or lower the floor; `no_spool`: enable `buffer`; `output_rejected`: read the output's WARN log for the receiver's reason |
+| Inputs stop reading, the log says `memory limit reached — inputs paused`, `memory_limited` reads 1 | the agent reached 90% of `limits.memory_limit_mib` — usually a long outage with an in-memory spool, or a burst larger than the budget | nothing is dropped by the pause itself; inputs resume below 80%. If it pauses often, raise `memory_limit_mib`, or give the buffer a `dir` so the backlog is held on disk instead of in memory |
+| Startup logs `buffer options are set but buffer.enabled is false — there is NO spool`, and events are dropped (`no_spool`) while a destination is down | the `buffer` block sets `dir` (or another option) but not `enabled: true` | add `enabled: true` to `buffer` |
 | `events_dropped` climbing with the `otlp` output | receiver is permanently rejecting batches (auth? schema?) | check the `otlp` WARN logs / `dead_letter_dir` for the rejection cause |
+| Enrollment fails with HTTP 403 and `missing tenant slug` | `management.tenant_slug` is not set; the control plane needs it to know which tenant the agent joins | set `management.tenant_slug` (the default tenant is `default`) next to `enrollment_token`, and restart |
 | `hec` output logs a 401/403 authentication WARN | wrong/revoked/disabled HEC token | check `token` against the Splunk HEC token config; events are **spooled, not dropped**, and are retried once the token is fixed |
 | HEC accepts events (2xx, `events_out` climbing) but they aren't searchable in Splunk | events land in an index/sourcetype you're not searching, or indexing hasn't caught up yet | check the token's default `index` (or the `index`/`sourcetype` options) and the search's index scope; for a stronger guarantee than "HTTP accepted it", enable `use_ack: true` (needs acknowledgment enabled on the token) so the batch only commits once Splunk confirms it's indexed |
 | Config won't load | YAML/type error | the agent exits with the parse error; validate against [the reference](CONFIGURATION.md) |
 | Config rejected with `... must be positive` (e.g. `management.heartbeat_every must be positive`) | a negative interval was set for `heartbeat_every`, `config_poll_every`, or `buffer.flush_every` | give the interval a positive duration (or omit it to take the default). A negative value is refused at validation on purpose — it would otherwise panic the timer at runtime. A locally-loaded bad config makes the agent exit with this error at startup; a **pushed** bad config is refused at pull time (the agent logs `remote config rejected` and keeps running its current config, unchanged on disk) rather than being written and reloaded |
-| Agent logs `config build failed; rolled back to last-known-good` | a pushed config parsed but failed to build (bad `ca_file` path, bound port, etc.) | the agent keeps running on the previous good config (kept beside it as `agent.yaml.lkg`) instead of crash-looping; fix the pushed config and re-push, or correct the underlying host issue. You don't have to read the agent's local log to catch this — a rolled-back config is also reported to the control plane on the next heartbeat (the rejected config version is marked **failed** with the reason), so it surfaces in the fleet view. The lifecycle completes on success too: an agent running cleanly on a pulled config confirms it once, so the version shows **applied** — and a previously failed version stops showing failed once a corrected agent confirms it |
+| Agent logs `config build failed; rolled back to last-known-good` | a pushed config parsed but failed to build (bad `ca_file` path, bound port, etc.) | the agent keeps running on the previous good config (kept beside it as `agent.yaml.lkg`) instead of crash-looping, and puts it back in `agent.yaml`; the rejected configuration is kept as `agent.yaml.rejected` — for a local edit, take your change from there. Fix the pushed config and re-push, or correct the underlying host issue. You don't have to read the agent's local log to catch this — a rolled-back config is also reported to the control plane on the next heartbeat (the rejected config version is marked **failed** with the reason), so it surfaces in the fleet view. The lifecycle completes on success too: an agent running cleanly on a pulled config confirms it once, so the version shows **applied** — and a previously failed version stops showing failed once a corrected agent confirms it |
 | Events arrive with a `spool_tamper="true"` field, or `logrok_agent_spool_tamper_detected_total` climbs, or the heartbeat carries `metadata.spool_tamper: true` | the disk spool's tamper-evidence chain caught a modified/deleted/reordered/reinserted record or segment since it was written | the flagged events are still delivered — nothing is lost or blocked. Stop the agent (or copy the spool dir) and run `-verify-spool` for the authoritative report (first divergence, affected count) — see [Auditing the spool](#auditing-the-spool). The heartbeat flag is **sticky until restart** (it won't clear itself), so treat it as a "go look" signal and use the in-band field / verifier report as the record of what actually happened. Rule out a benign cause first: a live-agent `-verify-spool` run against an in-flight append can report a torn tail, which is **not** tamper |
 
 ## Using with logrok
@@ -2099,8 +2621,15 @@ logrok is one possible destination. When forwarding into a logrok deployment:
   that port is a logrok convention, not a syslog standard.
 - Keep the default `encoding: text` — logrok extracts structured fields from the `[logrok@66371]` SD
   element, which `encoding: json` drops (fields would arrive unparsed inside the message).
+- Every event the agent collected carries `agent_type: luna`, `agent_version` and (enrolled) `agent_id`;
+  in logrok search `extra.agent_type:luna` shows only LUnA events. Events a gateway agent relays from
+  other collectors are not labeled LUnA.
+- **Multi-line fields (Windows Event Log, e.g. 4672's privilege list):** set the logrok listener's
+  **Framing** to `auto` and the agent's `framing: octet-counting`, so each message arrives whole. Never point
+  `framing: octet-counting` at a listener left on the default `newline` framing — it would misread the
+  messages.
 - For central fleet management, install/operation of the platform side, and viewing the forwarded logs, see the
-  **[logrok platform documentation](https://github.com/logiqum/logrok)**.
+  **logrok platform documentation** (shipped with the logrok platform).
 - Nothing about the agent is logrok-specific — the same config forwards to any syslog/TLS aggregator. logrok's
   docs cover the *downstream* (routing, storage, analysis); this guide covers the *agent*.
 
@@ -2110,9 +2639,13 @@ With central management, agents upgrade themselves when the control plane's Agen
 version (available for agents 1.5.0 and later; the control plane needs the matching release pack uploaded
 to its catalog). What happens on the host, in order:
 
-1. **The offer is verified.** It arrives on the heartbeat, signed by the control plane, and must name this
-   agent, its operating system and CPU architecture, and be unexpired. Anything else is refused and reported
-   as such.
+1. **The offer is verified.** It arrives on the heartbeat from the control plane this agent is enrolled
+   to — signed by that control plane, or unsigned over a **verified https** connection to it (a control
+   plane needs no licence-signing key to offer upgrades; over plain http, or with
+   `management.tls.insecure_skip_verify: true`, only a signed offer is accepted, because then the connection
+   does not prove who sent it) — and must name this agent, its operating system and CPU architecture, and be
+   unexpired. Anything else is refused and reported as such. An offer may name an **older** version than the
+   one running: that is how the control plane rolls an agent back, so it is accepted on the same terms.
 2. **The binary is downloaded from the control plane** (never from the internet — air-gapped sites work)
    and checked three ways: its checksum must equal the offer's, equal what the control plane announced, and
    appear in a `SHA256SUMS` that was signed at build time with the logrok **release** key. The agent verifies
@@ -2180,7 +2713,7 @@ matter.
 
 **Available now — fleet operations:** central enrollment, configuration pull with validated hot reload and
 last-known-good rollback, the running configuration reported (secrets kept on the host) and adoptable
-from the fleet view, and **remote upgrade from the control plane** (signed offer, release-key-verified
+from the fleet view, and **remote upgrade from the control plane** (offer from the enrolled control plane, release-key-verified
 binary, out-of-process self-check, staged restart; `management.remote_upgrade`) — the last shipped
 2026-09-25 and awaits its first real fleet rollout after the 1.5.0 release.
 
@@ -2192,16 +2725,23 @@ hardware), file tail (`filetail` — globs, rotation, multiline, restart-resume,
 container-log parsing via
 `format: cri|docker|auto` — see [Kubernetes](#kubernetes)), systemd `journald` (Linux), `linux_audit` kernel
 audit trail (Linux; multi-record reassembly + EXECVE/PROCTITLE hex-decoding, file-follow or CAP_AUDIT_READ
-netlink multicast — verified against a live auditd host), `oslog` macOS unified log (macOS), `syslog_in`
+netlink multicast — verified against a live auditd host; file mode resumes from a saved position after a
+restart), `oslog` macOS unified log (macOS), `syslog_in`
 (TCP/UDP and unix-socket `/dev/log` replacement, RFC 5424 structured-data → fields), `http_in` (HTTP(S) POST
-ingress for webhooks/IoT, TLS/mTLS + bearer token), `mqtt_in` (MQTT 3.1.1 subscriber for IoT/edge brokers), `snmptrap_in` (native SNMP v1/v2c/v3-USM trap + inform receiver — the OT/network-device ingest, no snmptrapd needed),
+ingress for webhooks/IoT, TLS/mTLS + bearer token), `mqtt_in` (MQTT 3.1.1 subscriber for IoT/edge brokers), `beats_in` (Beats / Logstash protocol receiver —
+Filebeat, Winlogbeat and the other Elastic Beats ship to the agent unchanged; acknowledged only after the events
+are durable; verified with a real Filebeat, including an agent crash mid-stream, and with Winlogbeat on Windows), `fluent_in` (Fluent Bit / Fluentd Forward protocol receiver — acknowledged
+only after the logs are durable, shared-key handshake, TLS; verified with a real Fluent Bit, including an agent crash), `otlp_in` (OpenTelemetry logs
+receiver, OTLP gRPC + HTTP on one port; answers only after the logs are durable; verified with a real OpenTelemetry Collector, including an agent crash), `hec_in` (Splunk HEC-compatible
+receiver — event, raw, health and ack endpoints; answers only after the events are durable; verified with Docker's splunk logging driver), `gelf_in`
+(GELF 1.1 over UDP — chunked, gzip/zlib — and TCP; Apex), `openwec_in` (Windows events forwarded by agentless hosts through an OpenWEC collector, same fields as `windows_eventlog`, sender-versus-host check; Apex), `snmptrap_in` (native SNMP v1/v2c/v3-USM trap + inform receiver — the OT/network-device ingest, no snmptrapd needed),
 `modbus_in` (Modbus **TCP and RTU/serial** polling that extracts OT *events* — value changes, threshold crossings, device outages —
 rather than streaming registers; read-only by construction; TCP verified against a Modbus TCP simulator and RTU over a virtual serial pair),
 and `relay_in` (the receiving end of the ack'd agent→agent transport).
 
 **Processors:** `add_fields` / `filter` / `expr` (conditional set/drop/rename),
 `parse_json` / `parse_csv` / `parse_kv` / `parse_xml` (message → structured fields), the edge
-volume-reduction set `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (hard daily budget) / `adaptive_sample` (dynamic
+volume-reduction set `sample` / `throttle` / `dedup` / `trim_fields` / `quota` (hard daily budget) / `aggregate` (per-group counts per window, new in 1.7.0) / `adaptive_sample` (dynamic
 sampling toward a target, with the effective rate stamped so counts survive) — see
 [Reduce volume at the edge](#reduce-volume-at-the-edge) — and `redact`, which removes sensitive values
 (built-in email / IPv4 / Luhn-checked card patterns, plus your own) on the endpoint, before they cross the
@@ -2213,7 +2753,7 @@ the digest of a changed file to the event that reported the change, so the platf
 the event still carries the user responsible — see
 [File-integrity events](#file-integrity-events-fim--what-the-agent-does-and-what-it-deliberately-doesnt). `noise_fingerprint` ✅ enforces platform noise decisions on the host (the same template fingerprint logrok computes at ingest; drop or mark; err and worse always pass).
 
-**Outputs:** `syslog` (RFC 5424 with TLS/mTLS over TCP, UDP diode mode, JSON encoding), `snare` (the legacy
+**Outputs:** `fluent` (Fluentd / Fluent Bit Forward protocol — new in 1.7.0), `beats` (Logstash / Graylog Beats input — new in 1.7.0; verified against a real Logstash, including an outage), `elasticsearch` (Elasticsearch / OpenSearch, bulk API — new in 1.7.0), `syslog` (RFC 5424 with TLS/mTLS over TCP, UDP diode mode, JSON encoding), `snare` (the legacy
 Snare/"MSWinEventLog" format for a SIEM expecting an NXLog/Snare feed), `relay` (ack'd reliable agent→agent
 transport), `otlp` (OpenTelemetry gRPC or HTTP, per-batch delivery acknowledgment, dead-letter quarantine —
 see [Forwarding to OpenTelemetry](#forwarding-to-opentelemetry-otlp)), and `hec` (Splunk HTTP Event Collector,
@@ -2241,6 +2781,9 @@ exactly the destinations that want it — see
 **tamper-evident hash-chained spool** on by default + the offline `-verify-spool` auditor CLI — see
 [Auditing the spool](#auditing-the-spool)), Prometheus `/metrics` including license posture
 (state / tier / grace countdown, also reported on every heartbeat — see [Verify & monitor](#verify--monitor)),
+optional **parallel processing** (`service.workers`: the parallel-safe leading processors on several cores,
+order-dependent ones and delivery order unchanged — see
+[Tuning throughput](#tuning-throughput--batch-size-first-then-processor-workers)),
 and **central management, live end-to-end**: one-time enrollment, heartbeat, and config-pull with validated
 hot-reload and last-known-good rollback — against the logrok control plane, any compatible implementation, or
 fully unmanaged from a local file (see [CONFIGURATION → management](CONFIGURATION.md#management)).
@@ -2257,5 +2800,5 @@ a macOS Endpoint Security input.
 
 - **Linux (systemd):** `sudo systemctl disable --now logrok-agent`, then remove the unit, binary, and (if
   desired) the spool/config dirs.
-- **Windows:** `sc stop LogrokUniversalAgent && sc delete LogrokUniversalAgent`, then remove the binary and the
+- **Windows:** `sc stop logrok-universal-agent && sc delete logrok-universal-agent` (the MSI's service name; use `LogrokUniversalAgent` if you created the service by hand with `sc create` as above), then remove the binary and the
   `C:\ProgramData\logrok-universal-agent\` directory.

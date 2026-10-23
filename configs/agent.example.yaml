@@ -11,11 +11,18 @@
 # below are reminders, not the full list. Tier table: docs/LICENSING.md.
 
 service:
-  mode: service            # service | standalone
+  mode: service            # informational only (defaults to service); the agent runs as a Windows Service or in the foreground depending on how it is started, not on this key
   log_level: info          # debug | info | warn | error
   # log_file: /var/log/logrok-agent/agent.log   # append the log here instead of stdout (rotated once
   #                        # at 50 MiB); crash reports go there too. Set on Windows (a service has no console)
   # metrics_listen: "127.0.0.1:9090"   # serve Prometheus metrics at /metrics (bind localhost)
+  # batch_size: 256        # events per destination write (1-16384); larger = more throughput, more memory
+  # batch_timeout: 1s       # send a partial batch after this long
+  # shutdown_grace: 15s   # on stop, how long to keep delivering the last batch (1s-10m; 0/unset = 15s);
+                           # past it the batch is re-read by file/journal inputs, lost by network inputs
+  # workers: 1             # 2-64 = run the leading parallel-safe processors (parsers, redact, lookup,
+                           # noise_fingerprint, ...) on N workers; order-dependent ones (dedup, throttle,
+                           # quota, aggregate) still run in arrival order. Delivery order is unchanged.
   # fips: on               # on | off (unset = run as built; the shipped build is FIPS) — SETS the crypto posture
                            # Applied by re-executing once at startup; the PID does not
                            # change, so service supervision is unaffected. Turn off only
@@ -46,6 +53,7 @@ management:
   #                        # else agent-state.json next to this file (0600; holds agent_id + api_key)
   # api_key: ""            # manual provisioning alternative to enrollment
   # tenant_slug: "default"
+  # config_signing_keys: ["ed25519:…"]   # apply pulled configs only when signed by one of these keys (-gen-config-signing-key / -sign-config)
   # heartbeat_every: 30s
   # config_poll_every: 60s
   # report_config: true    # heartbeat carries the running config so the fleet view can show/adopt it;
@@ -63,6 +71,8 @@ management:
   #   cert_file: /etc/logrok-agent/agent.pem  # client cert presented for mTLS
   #   key_file: /etc/logrok-agent/agent.key
   #   # server_name: control-plane.internal
+  #   # system_roots: true   # enrolled mode: also trust the system CA store (default);
+  #   #                       # false = trust only ca_file + the CA chain the control plane delivers
   #   # max_cert_age: 168h   # enrolled mode: renew at this age even when far from
   #   #                       # expiry, so the agent moves across a control-plane CA
   #   #                       # rotation. Without it a long-lived cert never renews
@@ -82,6 +92,14 @@ buffer:
   when_full: drop_oldest   # at the cap: drop_oldest (keep freshest) | drop_newest | block (back-pressure, no loss)
   flush_every: 2s          # spool drain cadence: how often a destination retries its backlog once the output is back (recovery pacing; live events ship immediately)
   # chain_key_file: /var/lib/logrok-agent/spool-chain.key   # tamper-evident chain key path; auto-resolved + auto-generated (0600) if omitted — the chain itself is always on when `dir` is set
+  # encrypt: true               # encrypt spooled events at rest (AES-256-GCM); back up the key — without it they cannot be delivered
+  # encryption_key_file: /var/lib/logrok-agent/spool-encryption.key   # default: beside the chain key, auto-created 0600
+  # min_free_bytes: 5368709120   # keep 5 GiB free on the spool's disk whatever max_bytes allows; a batch that would cross it follows when_full. 0 = no floor
+
+# Optional caps on the agent's own resource use. Omit for no caps.
+# limits:
+#   max_procs: 2            # run on at most 2 CPU cores at once; 0 = runtime default (all cores / container quota)
+#   memory_limit_mib: 512   # pause reading inputs at 90% of this, resume below 80%; nothing accepted is dropped. 0 = none, else >= 32
 
 # Optional. Omit for the free Core tier (also the non-commercial / free-with-logrok path).
 # A standalone commercial deployment points at a signed offline license; it's verified
@@ -98,6 +116,7 @@ inputs:
     bookmark_path: 'C:\ProgramData\logrok-universal-agent\bookmarks'
     # query: "*[System[(Level=1 or Level=2 or Level=3)]]"   # optional XPath / structured query
     # render: xml   # body = raw native Windows Event XML (like the syslog-ng Windows Agent); default "message"
+    # resolve_sids: false   # default true: resolve the event's user SID to account_name/account_domain/account_type
     # file: 'C:\forensics\Security.evtx'   # offline: drain a saved .evtx/.evt file (or glob) instead of live channels; one-shot, mutually exclusive with `channels`
 
   # - type: etw                       # Windows ETW real-time trace session (Windows only; stub elsewhere)
@@ -132,7 +151,7 @@ inputs:
   #   paths: ['/var/log/**/*.log']    # or multiple globs (** = recursive); *.gz matches are drained once (rotated archives)
   #   exclude: ['/var/log/**/audit.log']
   #   start_at: end                   # end (new lines only) | beginning — used when no checkpoint exists
-  #   state_path: '/var/lib/logrok-agent/filetail.state'   # resume offset across restarts (omit = none)
+  #   state_path: '/var/lib/logrok-agent/filetail.state'   # resume offset across restarts (omit = saved under the state dir's positions/; "" = none)
   #   poll_interval: 500ms
   #   fingerprint_size: 1024          # bytes used to identify a file across rotation
   #   facility: 16                    # syslog facility (16=local0; matches eventlog/journald)
@@ -142,6 +161,11 @@ inputs:
   #     line_start_pattern: '^\d{4}-\d{2}-\d{2}'   # a new event starts on a timestamp line
   #     # line_end_pattern: '\}\s*$'  # ...or close on an end pattern (use one, not both)
   #     flush_timeout: 5s
+  #   # Every input also takes (refused on processors/outputs):
+  #   host_override: web-01           # replace the host of this input's events
+  #   add_fields:                     # stamp fields on this input's events only
+  #     splunk.index: web             # splunk.index/sourcetype/source/host: per-event Splunk metadata (the hec output uses them)
+  #     splunk.sourcetype: "app:log"
 
   # Kubernetes node-level collector (DaemonSet): tail every container's logs,
   # reassemble CRI partial lines, tag with pod/namespace/container metadata.
@@ -161,6 +185,59 @@ inputs:
   #   socket: /run/logrok/log.sock    # unix only: local syslog ingress (/dev/log shape; im_uds parity)
   #   # socket_protocol: unixgram     # default (what syslog(3) speaks); or 'unix' (stream)
   #   # socket_mode: "0666"           # socket file permissions
+  #   # tls_listen: "0.0.0.0:6514"    # syslog over TLS (RFC 5425) beside listen
+  #   # tls_cert_file: /etc/logrok-agent/server.pem
+  #   # tls_key_file:  /etc/logrok-agent/server.key
+  #   # tls_client_ca_file: /etc/logrok-agent/ca.pem  # mTLS: require device certificates
+  #   # parse_tag: true               # RFC 3164: lift "myapp[88]: " into app/procid (sent as APP-NAME/PROCID); default false
+  #   # max_connections: 1024         # concurrent TCP/TLS/unix-stream connections; more are closed at once
+  #   # udp_listeners: 1              # UDP sockets on listen, one core each (1-64 or auto; Linux/FreeBSD above 1); >1 = no order across them
+  #   # udp_receive_buffer_bytes: 8388608  # per UDP socket (capped by net.core.rmem_max); 0 = OS default
+
+  # - type: gelf_in                   # receive GELF (Docker gelf driver, Graylog libraries) — Apex
+  #   listen: "0.0.0.0:12201"
+  #   # protocols: [udp, tcp]         # default both
+  #   # max_message_bytes: 8388608    # after decompression / chunk reassembly
+  #   # udp_listeners: 1              # as syslog_in: 1-64 or auto (Linux/FreeBSD above 1)
+  #   # udp_receive_buffer_bytes: 8388608  # per UDP socket; 0 = OS default
+
+  # - type: openwec_in                # receive from an OpenWEC collector (agentless Windows hosts via WEF) — Apex
+  #   listen: "127.0.0.1:5170"        # OpenWEC output: driver "Tcp", format "RawJson"
+  #   # socket: /run/openwec/agent.sock   # or its "UnixDatagram" driver (instead of listen) — preferred on the same host
+  #   # socket_mode: "0660"           # default 0600; 0660 + a shared group when OpenWEC runs as its own user
+  #   # trusted_forwarders: ["wec01$@CORP.EXAMPLE"]  # collectors allowed to relay other hosts' events
+  #   # on_identity_mismatch: flag    # flag (default) or drop events whose host is not the sender
+  #   # render: message               # or xml (the original event XML)
+
+  # - type: hec_in                    # receive the Splunk HEC API (anything that sends to Splunk HEC) — Apex
+  #   listen: "0.0.0.0:8088"
+  #   tokens: ["REPLACE_WITH_HEC_TOKEN"]        # required; senders present Authorization: Splunk <token>
+  #   # tls_cert_file: /etc/logrok-agent/server.pem   # HTTPS (with tls_key_file)
+  #   # tls_key_file:  /etc/logrok-agent/server.key
+  #   # commit_timeout: 60s           # longest a request waits for durability
+
+  # - type: otlp_in                   # receive OpenTelemetry logs (OTLP gRPC + HTTP) — Apex
+  #   listen: "0.0.0.0:4317"          # gRPC and HTTP (/v1/logs) on one port
+  #   # auth_token: "REPLACE_WITH_OTLP_TOKEN"   # require Authorization: Bearer <token>
+  #   # tls_cert_file: /etc/logrok-agent/server.pem   # TLS (with tls_key_file)
+  #   # tls_key_file:  /etc/logrok-agent/server.key
+  #   # max_body_bytes: 4194304       # largest request, decompressed (gRPC default limit)
+  #   # commit_timeout: 60s           # longest an export waits for durability
+
+  # - type: fluent_in                 # receive from Fluent Bit / Fluentd (Forward protocol) — Apex
+  #   listen: "0.0.0.0:24224"         # point the fleet's forward output here (Require_ack_response True)
+  #   # shared_key: "REPLACE_WITH_SHARED_KEY"   # require the shared-key handshake
+  #   # tls_cert_file: /etc/logrok-agent/server.pem   # TLS (with tls_key_file)
+  #   # tls_key_file:  /etc/logrok-agent/server.key
+  #   # message_keys: [log, message, msg, MESSAGE]   # record keys tried for the message
+
+  # - type: beats_in                  # receive from Filebeat/Winlogbeat (Logstash Beats protocol) — Apex
+  #   listen: "0.0.0.0:5044"          # point the Beats' output.logstash.hosts here
+  #   # tls_cert_file: /etc/logrok-agent/server.pem   # TLS (with tls_key_file); Beats: ssl.enabled + CA
+  #   # tls_key_file:  /etc/logrok-agent/server.key
+  #   # tls_client_ca_file: /etc/logrok-agent/ca.pem  # mTLS: require Beats client certificates
+  #   # max_window: 16384             # largest window a Beat may announce (default 16384; a Beat's own bulk_max_size defaults to 2048)
+  #   # keepalive: 5s                 # keepalive acks while a window is in flight (Beats timeout 30s)
 
   # - type: http_in                   # receive log lines over HTTP(S) POST (webhooks, IoT/edge, shippers)
   #   name: webhook
@@ -177,16 +254,17 @@ inputs:
   # - type: snmptrap_in               # receive SNMP traps/informs from network & OT devices (Apex)
   #   listen: "0.0.0.0:1162"          # UDP; port 162 needs CAP_NET_BIND_SERVICE — 1162 + a redirect works unprivileged
   #   versions: [v1, v2c, v3]         # accepted versions; default [v1, v2c]
-  #   community: [mycommunity]        # v1/v2c allow-list (empty = accept any; plaintext — prefer v3)
+  #   community: [mycommunity]        # v1/v2c allow-list; ["*"] = accept any on purpose (empty = accept any + warning; will be refused later)
   #   v3_users:                       # required when versions includes v3
   #     - username: otuser
   #       auth_protocol: sha256       # sha256 recommended (sha/sha224/sha384/sha512; md5 legacy)
   #       auth_password: authpass
-  #       priv_protocol: aes256       # aes/aes192/aes256 recommended (des legacy; empty = authNoPriv)
+  #       priv_protocol: aes256       # aes/aes192/aes256 (Blumenthal) or aes192c/aes256c (Cisco); des legacy; empty = authNoPriv
+  #       # allow_legacy_crypto: true  # explicit opt-in for md5 auth / des priv (non-approved). Without it such users are still accepted this release but log a warning, and are refused from the next minor release; counted in snmptrap_legacy_crypto_users
   #       priv_password: privpass
   #   # oid_names: {"1.3.6.1.6.3.1.1.5.3": linkDown}   # label your top OIDs; no MIB compiler
   #   # queue_size: 1024              # storm buffer; overflow is counted+dropped (UDP can't be back-pressured)
-  #   # source: snmptrap_in           # Event.Source label; facility/severity default 23/5 (local7/notice)
+  #   # source: snmptrap              # Event.Source label; facility/severity default 23/5 (local7/notice)
 
   # - type: modbus_in                 # poll Modbus TCP devices — emits OT EVENTS, never raw register streams (Apex)
   #   targets:                        # required; each device polled on its own connection + schedule
@@ -216,7 +294,7 @@ inputs:
   #   #   device: /dev/ttyUSB0        # COM3 on Windows; agent needs permission (Linux: dialout group)
   #   #   baud: 19200                 # 1200..115200; Modbus default 19200
   #   #   parity: even                # even (default) | odd | none
-  #   #   stop_bits: 1                # 1, or 2 when parity is none (keeps the frame 11 bits)
+  #   #   stop_bits: 1                # 1 or 2; default is 2 when parity is none (keeps the frame 11 bits), else 1
   #   #   data_bits: 8                # must be 8 (7 = Modbus ASCII, not supported)
   #   #   unit_id: 1
   #   #   watches: [...]              # identical to TCP
@@ -245,12 +323,13 @@ inputs:
   #   units: [nginx.service]          # optional -u filters; omit for all units
   #   identifiers: [myapp]            # optional -t tag filters (matches logger/syslog(3) entries)
   #   priority: warning               # optional -p max priority (0-7 or name)
-  #   cursor_file: '/var/lib/logrok-agent/journal.cursor'   # resume across restarts (agent-owned checkpoint)
+  #   cursor_file: '/var/lib/logrok-agent/journal.cursor'   # resume across restarts (omit = saved under the state dir's positions/; "" = none)
 
   # - type: linux_audit               # Linux kernel audit trail / auditd (Linux only; stub elsewhere)
   #   mode: file                      # file (follow auditd's log; default) | multicast (live netlink feed, needs CAP_AUDIT_READ)
   #   path: /var/log/audit/audit.log  # file mode: audit log path or glob (newest match wins)
-  #   read_from: end                  # file mode: end (new records only; default) | beginning
+  #   read_from: end                  # file mode: end (new records only; default) | beginning — first start only
+  #   # state_path: ""                # file mode: saved read position (omit = under the state dir's positions/; "" = none)
   #   # reassembly_timeout: 2s        # flush an event whose EOE terminator never arrives
   #   # max_in_flight: 1024           # bound on events being reassembled (overflow: emit oldest + warn)
   #   # source: linux_audit           # Event.Source label; severity/facility default 5/13 (log audit)
@@ -258,7 +337,7 @@ inputs:
   # - type: oslog                     # macOS unified log / OSLog (macOS only; stub elsewhere)
   #   predicate: 'subsystem == "com.apple.securityd"'   # optional NSPredicate filter
   #   level: info                     # optional: default | info | debug (verbosity)
-  #   checkpoint_file: '/usr/local/var/db/logrok-agent/oslog.checkpoint'  # resume across restarts
+  #   checkpoint_file: '/usr/local/var/db/logrok-agent/oslog.checkpoint'  # resume across restarts (omit = under the state dir's positions/; "" = none)
   #   backfill_on_start: true         # log show the gap before streaming (default true)
 
 processors:
@@ -343,6 +422,14 @@ processors:
   #   keep_min_severity: 3            # bypass deduplication for Severity <= 3
   #   keep_if: 'severity <= 3 && fields.event_id == "4625"'
 
+  # - type: aggregate                 # one summary event (count, sums) per group per window instead of the originals
+  #   group_by: [host, source]        # default; any event fields (not message)
+  #   window: 1m                      # default; clock-aligned
+  #   sum_fields: [bytes]             # numeric fields to add up (default none)
+  #   max_groups: 10000               # default; new groups past the cap pass through un-aggregated
+  #   keep_originals: false           # default; true = also forward every original
+  #   keep_min_severity: 3            # errors and worse are never aggregated
+
   # - type: trim_fields               # drop/allowlist fields, truncate long values; never drops events
   #   drop: [thread_id, stack_hash]   # field names to remove unconditionally
   #   drop_matching: '^debug_'        # regexp: remove fields whose name matches (e.g. debug_* fields)
@@ -418,7 +505,9 @@ outputs:
   #   name: lake
   #   endpoint: "https://splunk.example:8088"
   #   token: "REDACTED-HEC-TOKEN"
-  #   buffer: {when_full: drop_oldest}     # this sink may shed; the SIEM below must not
+  #   buffer: {when_full: drop_oldest}     # this sink may shed; to keep the SIEM below from shedding, uncomment its block override
+  #   # max_in_flight: 4                   # batches on the way at once (1-64, default 1); for a distant or slow receiver.
+  #                                        # Splunk may then get batches out of order; inputs still advance in order, at-least-once
   #
   # Kafka (or Redpanda / any Kafka-API broker). Acked per record; idempotent
   # produce always on; auth/ACL failures spool-and-retry (never discarded).
@@ -484,10 +573,12 @@ outputs:
     name: aggregator
     # when: 'severity <= 3'  # optional routing (fan-out): only matching events reach this destination
     endpoint: "aggregator:6514"
+    # buffer: {when_full: block}  # without this, this output follows the global when_full (drop_oldest above) and sheds too
     # failover_endpoints: ["collector-b.example:6514"]   # tried in order when the active endpoint fails; spool only when all fail
     # failback_every: 60s                                 # probe the primary while on a secondary; 0s = stay until it fails
     protocol: tcp            # default. 'udp' = one datagram per message (RFC 5426) for data diodes / udp() receivers; no TLS, no framing
-    framing: newline         # TCP only, default. one msg per LF (logrok syslog-ng + most receivers). 'octet-counting' = RFC 6587, opt-in
+    framing: newline         # TCP only, default. one msg per LF (logrok syslog-ng + most receivers). 'octet-counting' = RFC 6587, opt-in — REQUIRED for syslog-ng syslog() sources / appliance RFC 5424 ports (601), which drop newline frames silently
+    # header_from_fields: false # default true: APP-NAME/PROCID/MSGID from the app/procid(pid)/msgid fields; false = APP-NAME is the source (e.g. syslog-in), MSGID '-'
     # sequence: true         # add [seq@66371 session=".." n=".."] SD — receiver-side gap detection on one-way links
     # max_datagram_size: 8192 # UDP only — datagrams truncated to this many bytes
     # encoding: json         # default 'text'. 'json' = MSG is one JSON object (timestamp/host/source/severity/facility/message/fields), no fields-SD duplication; multi-line messages survive newline framing
@@ -566,6 +657,8 @@ outputs:
   #   token: "YOUR-HEC-TOKEN"                   # required. sent as "Authorization: Splunk <token>"
   #   index: main                    # default: omit → the token's default index
   #   sourcetype: logrok             # default: omit → Splunk's default for the token
+  #   source_style: agent            # default. agent (file:/var/log/x.log) | splunk (bare path, as a Splunk forwarder sends it)
+  #                                  # an event's splunk.index / splunk.sourcetype / splunk.source / splunk.host fields win over these
   #   source: ""                     # default: omit → the event's own Source (file:/path, windows-eventlog:Channel, …)
   #   event_format: message          # default. message (text body, fields as HEC indexed fields) | json (whole structured event as the body)
   #   gzip: false                    # default. Content-Encoding: gzip on POSTs (WAN-friendly)
@@ -577,6 +670,32 @@ outputs:
   #   ca_file: /etc/logrok-universal-agent/ca.pem   # default: "" (system roots)
   #   insecure_skip_verify: false    # default. DEV ONLY
   #   dead_letter_dir: /var/lib/logrok-agent/hec-dead-letter   # default: "" (drop, no quarantine); malformed-payload rejects land here as newline-delimited JSON (100 MiB cap)
+  #   endpoints: ["https://idx2.example:8088", "https://idx3.example:8088"]   # default: [] — more indexers; a batch failing on one is retried on the next at once
+  #   load_balance: round_robin      # default with several endpoints. round_robin (spread batches) | failover (first healthy, in order)
+  #   retry_unhealthy_after: 30s     # default. a failed endpoint is tried after the healthy ones for this long
+
+  # - type: fluent                   # Fluentd / Fluent Bit forward input (Forward protocol)
+  #   endpoint: "fluentd.example:24224"       # required (or endpoints)
+  #   # tag: luna                    # for events without one; fluent_in events keep their tag
+  #   # shared_key: "REPLACE_WITH_SHARED_KEY"    # answer the receiver's shared-key handshake
+  #   # require_ack: true            # wait for each request's acknowledgement
+  #   # compression: gzip            # gzip | none
+
+  # - type: beats                    # Logstash / Graylog Beats input (Beats protocol, lumberjack v2)
+  #   endpoint: "logstash.example:5044"       # required (or endpoints)
+  #   # endpoints: ["logstash2.example:5044"] # failover, in order
+  #   # timeout: 30s                 # wait for the next acknowledgement (keepalives restart it)
+  #   # compression_level: 3         # 0 = off, 1-9 zlib
+  #   # index: luna                  # @metadata.beat (Logstash's default index pattern uses it)
+  #   # tls: true                    # + ca_file / cert_file / key_file / cert_source as on syslog
+
+  # - type: elasticsearch            # Elasticsearch or OpenSearch, bulk API
+  #   endpoints: ["https://es1.example:9200"]   # required; one or more nodes
+  #   index: logs-luna-default       # default. data stream (Elasticsearch logs-*-* template) or index
+  #   api_key: "REPLACE_WITH_ES_API_KEY"       # "id:key" or base64; or username/password
+  #   item_retries: 3                # default. retries of only the throttled/failed documents per delivery
+  #   batch_max_bytes: 5242880       # default. largest bulk request
+  #   dead_letter_dir: /var/lib/logrok-agent/es-dead-letter   # default "" (drop, counted); 400/404 documents land here
 
   # - type: loki                     # Grafana Loki push API (self-hosted or Grafana Cloud)
   #   endpoint: "http://loki.example:3100"    # base URL; /loki/api/v1/push is implied
