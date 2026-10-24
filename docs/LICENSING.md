@@ -3,12 +3,10 @@
 How the agent decides which capabilities it may run. The model is **offline-first**
 (no phone-home), so it works in air-gapped and OT environments.
 
-> **The binding terms are in [`LICENSE`](../LICENSE) — the Logiqum End User License Agreement, one
-> agreement for LUnA (Logrok Universal Agent), `luna-migrate` and logrok.** Installing or using LUnA means you accept it. This guide
-> explains the *mechanics* — how entitlements are delivered, verified, and enforced. The Agreement defines
-> the free tier ("Core") by reference to the Documentation: the Core and Apex contents in §1 below are that
-> definition. On everything else, where the two ever appear to differ, `LICENSE` governs; please read it
-> rather than relying on any summary, including this one.
+> **The binding terms are in [`LICENSE`](../LICENSE), not in this document.** This guide explains the
+> *mechanics* — how entitlements are delivered, verified, and enforced. What you are permitted to run,
+> and on how many agents, is stated in the End-User License Agreement itself. Where the two ever appear
+> to differ, `LICENSE` governs; please read it rather than relying on any summary, including this one.
 
 ## 1. The model
 
@@ -23,7 +21,7 @@ The free **Core** tier always runs with **no license at all**; every gated capab
 | Tier | Contents |
 |---|---|
 | **Core** (free) | file tail · syslog-in · journald · HTTP-in · parsers (json/csv/kv/xml/expr/add_fields/filter) · TLS syslog output (including `failover_endpoints` / `failback_every` — one destination, made reliable) · metrics |
-| **Apex** (paid) | **Windows Event Log** · ETW · WMI · Linux audit (`linux_audit`) · MQTT ingest (`mqtt_in`) · Beats receiver (`beats_in`) · Fluent Forward receiver (`fluent_in`) · OTLP logs receiver (`otlp_in`) · Splunk HEC receiver (`hec_in`) · GELF receiver (`gelf_in`) · OpenWEC receiver (`openwec_in`) · disk store-and-forward spool · central fleet management · edge reduction (sample/throttle/dedup/trim_fields/quota/adaptive_sample/aggregate) · redaction (`redact`) · enrichment (`lookup`) · per-agent enrolled mTLS · ack'd relay transport · Kubernetes container-log collector · macOS unified-log (`oslog`) · UDP / data-diode output · **multi-destination fan-out** (more than one output, or a `when:` routing condition on any output — even a single one) · SNMP trap/inform receiver (`snmptrap_in`) · Modbus (`modbus_in`) · Solaris BSM audit trail (`bsm_audit`) · file-content hashing (`file_hash`) · noise enforcement at the source (`noise_fingerprint`) · **every destination other than RFC 5424 syslog** (`snare`/`hec`/`sentinel`/`xsiam`/`kafka`/`s3`/`loki`/`otlp`/`elasticsearch`/`beats`/`fluent`) · extended OS platforms (AIX/Solaris/BSD) |
+| **Apex** (paid) | **Windows Event Log** · ETW · WMI · Linux audit (`linux_audit`) · MQTT ingest (`mqtt_in`) · disk store-and-forward spool · central fleet management · edge reduction (sample/throttle/dedup/trim_fields/quota/adaptive_sample) · redaction (`redact`) · enrichment (`lookup`) · per-agent enrolled mTLS · ack'd relay transport · Kubernetes container-log collector · macOS unified-log (`oslog`) · UDP / data-diode output · **multi-destination fan-out** (more than one output) · SNMP trap/inform receiver (`snmptrap_in`) · Modbus (`modbus_in`) · Solaris BSM audit trail (`bsm_audit`) · file-content hashing (`file_hash`) · noise enforcement at the source (`noise_fingerprint`) · **every destination other than RFC 5424 syslog** (`snare`/`hec`/`sentinel`/`xsiam`/`kafka`/`s3`/`loki`/`otlp`) · extended OS platforms (AIX/Solaris/BSD) |
 
 **The dividing line, in one sentence:** Core collects from the host and forwards **one open
 standard — RFC 5424 syslog over TCP/TLS — to one destination**. Anything that reads a privileged or
@@ -34,8 +32,7 @@ encryption is not a paid feature.
 
 Fifteen modules were Apex by this definition but were not marked or checked in earlier releases:
 `etw`, `wmi`, `linux_audit`, `mqtt_in`, `redact`, `lookup`, `adaptive_sample`, and the eight
-non-syslog outputs (`snare`, `hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`). The
-`elasticsearch`, `beats` and `fluent` outputs, added in 1.7.0, are non-syslog destinations too and run under the same terms.
+non-syslog outputs (`snare`, `hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`).
 
 They are now marked and reported, but **not withdrawn**: an unlicensed agent using them warns, reports
 posture `degraded`, and keeps running them until the next **major** version. See §6. **Core did not
@@ -133,8 +130,7 @@ agents, on every heartbeat):
 What degrade-to-Core does, concretely: the unlicensed Apex inputs/processors/outputs are
 removed from the running pipeline, each removal logged at startup
 (`licensing: degraded to Core — unlicensed Apex features disabled`). An unlicensed
-multi-output (fan-out) config keeps its **first** output and drops the rest, and a `when:` routing
-condition is cleared (the surviving output then receives every event) — forwarding
+multi-output (fan-out) config keeps its **first** output and drops the rest — forwarding
 never stops entirely. A few capabilities are
 warned about but never disabled, because disabling them would be self-defeating: the
 fleet-management/enrollment plumbing (an agent must keep the path to *becoming* licensed) and
