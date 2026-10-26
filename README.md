@@ -4,9 +4,12 @@ The cross-platform, vendor-neutral endpoint **log-forwarding agent**: a single s
 that collects endpoint logs (Windows Event Log, ETW, WMI, files, journald, syslog, MQTT, HTTP, Linux audit,
 macOS unified logs, SNMP traps, Modbus equipment, …) and forwards them as standard **syslog (RFC 5424) over
 TCP/TLS** to any aggregator — a [logrok](https://logrok.com) deployment by default, or any third-party syslog
-collector / SIEM. It also delivers natively to **Splunk HEC, Microsoft Sentinel, Cortex XSIAM, Kafka, S3,
-Grafana Loki and OTLP** when you would rather skip the syslog hop. Disk store-and-forward keeps data safe
-across air-gapped or intermittent links.
+collector / SIEM. It also delivers natively to **Splunk HEC, Microsoft Sentinel, Cortex XSIAM, Elasticsearch /
+OpenSearch, Kafka, S3, Grafana Loki, OTLP, Logstash (Beats) and Fluentd (Forward)** when you would rather skip
+the syslog hop. As a gateway it receives from Filebeat and Winlogbeat, Fluent Bit, OpenTelemetry Collectors,
+Splunk HEC senders and GELF, and from Windows hosts with no agent installed, through Windows Event Forwarding
+and an OpenWEC collector. Disk store-and-forward keeps data safe across air-gapped or intermittent links, and
+the Linux, Windows, macOS, FreeBSD, NetBSD and Solaris binaries run in FIPS 140-3 mode by default.
 
 **This repository hosts the public downloads and the operator docs.** The friendly landing page is
 **[logrok.com/download](https://logrok.com/download)**.
@@ -26,6 +29,8 @@ the [**latest release**](https://github.com/logiqum/luna/releases/latest) has th
 | **macOS** Intel / Apple Silicon | `luna-darwin-amd64.pkg` · `luna-darwin-arm64.pkg` |
 | **Container** (multi-arch) | `docker pull ghcr.io/logiqum/luna:latest` |
 | **Other** | FreeBSD / NetBSD / OpenBSD / Solaris / AIX static binaries |
+| **LUnA Crescent** (constrained hosts) | `luna-crescent-<os>-<arch>` for Linux (amd64, arm64, armv7, riscv64, mipsle), FreeBSD, OpenBSD and NetBSD, plus `.deb` / `.rpm` / `.tar.gz` — a smaller build with the core inputs, the syslog output and disk store-and-forward |
+| **luna-migrate** (converter) | `luna-migrate-<os>-<arch>` for Linux, Windows and macOS — see below |
 
 Quick starts:
 
@@ -43,12 +48,21 @@ msiexec /i luna-windows-amd64.msi /qn
 sudo installer -pkg luna-darwin-arm64.pkg -target /
 
 # Container (gateway / Kubernetes)
-docker run -d --name logrok-agent \
-  -v /etc/logrok-agent/agent.yaml:/etc/logrok-agent/agent.yaml:ro \
-  -v logrok-spool:/var/lib/logrok-agent \
+docker run -d --name logrok-universal-agent \
+  -v /etc/logrok-universal-agent/agent.yaml:/etc/logrok-universal-agent/agent.yaml:ro \
+  -v logrok-spool:/var/lib/logrok-universal-agent \
   -p 5514:5514 \
   ghcr.io/logiqum/luna:latest
 ```
+
+## Moving from another forwarder
+
+`luna-migrate` turns another forwarder's configuration into a LUnA configuration, plus a report of everything
+it could not carry over, and checks the result with the installed agent. Credentials are never copied. Sources:
+Splunk Universal Forwarder, Filebeat, Winlogbeat, NXLog, Fluent Bit, Fluentd, Promtail, the OpenTelemetry
+Collector, Graylog Sidecar, Elastic Agent, Wazuh / OSSEC, Datadog Agent, Azure Monitor Agent, Logstash,
+rsyslog, Vector and syslog-ng. Each [migration guide](docs/migration/) says what the converter was verified
+against. The converter is free; the modules a converted configuration uses are licensed as usual.
 
 ## Verify what you downloaded
 
@@ -89,7 +103,7 @@ use on up to **10 agents**.
 The line is simple: **Core collects from the host and forwards one open standard — RFC 5424 syslog over
 TCP/TLS — to one destination.** Anything that reads a privileged or proprietary operating-system subsystem
 (Windows Event Log, ETW, WMI, Linux audit, macOS unified logs), or speaks a named vendor or platform API
-(Splunk HEC, Microsoft Sentinel, Cortex XSIAM, Kafka, S3, Grafana Loki, OTLP), is **Apex** — as are disk
+(Splunk HEC, Microsoft Sentinel, Cortex XSIAM, Elasticsearch, Kafka, S3, Grafana Loki, OTLP, Beats, Fluent), is **Apex** — as are disk
 store-and-forward, central fleet management, per-agent mTLS, edge reduction, redaction, Kubernetes container
 logs, the UDP data-diode output and multi-destination fan-out. **TLS is never gated.** Apex is included at no
 charge with a licensed logrok deployment, or purchased standalone. Validation is fully offline — no
