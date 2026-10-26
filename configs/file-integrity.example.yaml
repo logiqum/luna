@@ -26,7 +26,7 @@ buffer:
   # File-integrity evidence is exactly the kind you cannot afford to lose during
   # an outage — an attacker-caused gap and a network-caused gap look identical
   # after the fact. when_full: block trades freshness for zero loss.
-  dir: /var/lib/logrok-agent/spool
+  dir: /var/lib/logrok-universal-agent/spool
   max_bytes: 1073741824
   when_full: block
   flush_every: 2s          # spool drain cadence (recovery pacing)
@@ -145,4 +145,4 @@ outputs:
     endpoint: "logrok.example.internal:16575"
     protocol: tcp
     tls: true
-    ca_file: /etc/logrok-agent/ca.pem
+    ca_file: /etc/logrok-universal-agent/ca.pem

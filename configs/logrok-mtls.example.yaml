@@ -1,0 +1,33 @@
+# logrok-universal-agent — managed by a logrok control plane, events over mutual TLS.
+# Copy, then set the two endpoints and the enrollment token. Full option reference: docs/CONFIGURATION.md.
+#
+# The agent enrolls once with the token, then the control plane issues it a client certificate and
+# renews it automatically; the private key is generated on this host and never leaves it. The same
+# certificate authenticates the agent on the control-plane channel and on the log channel, and the
+# CA the agent receives at enrollment (agent-ca.pem, next to state_path) verifies logrok's listener.
+
+service:
+  mode: standalone
+  log_level: info
+
+management:
+  endpoint: https://control-plane.example:16550
+  enrollment_token: "replace-with-your-token"   # one-time; remove once enrolled
+  state_path: /var/lib/logrok-universal-agent/state.json
+  tls:
+    mode: enrolled             # control-plane-issued, auto-renewed client certificate
+
+# Disk store-and-forward: survives restarts and an unreachable receiver (at-least-once).
+buffer:
+  enabled: true
+  dir: /var/lib/logrok-universal-agent/spool
+
+inputs:
+  - type: journald
+
+outputs:
+  - type: syslog
+    endpoint: "logs.example.com:6514"           # logrok's agent-mTLS listener
+    tls: true
+    cert_source: enrolled                       # present the enrolled certificate (mutual TLS)
+    ca_file: /var/lib/logrok-universal-agent/agent-ca.pem # delivered at enrollment

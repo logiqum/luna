@@ -8,7 +8,7 @@ service:
 # Disk store-and-forward: survives restarts and Splunk outages (at-least-once).
 buffer:
   enabled: true
-  dir: /var/lib/logrok-agent/spool
+  dir: /var/lib/logrok-universal-agent/spool
 
 inputs:
   - type: filetail
@@ -24,4 +24,4 @@ outputs:
     # gzip: true                 # compress POSTs (WAN-friendly)
     # use_ack: true              # commit only when INDEXED (token needs ack enabled)
     # ca_file: /etc/ssl/splunk-ca.pem
-    # dead_letter_dir: /var/lib/logrok-agent/hec-dead-letter
+    # dead_letter_dir: /var/lib/logrok-universal-agent/hec-dead-letter

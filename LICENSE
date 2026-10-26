@@ -1,118 +1,433 @@
-LUnA — logrok universal agent
-End-User License Agreement
+# End User License Agreement — Logiqum Software
 
-Copyright © 2026 Logiqum Korlátolt Felelősségű Társaság ("Logiqum").
-The Software is licensed, not sold.
+**v1.0 · 2026-10-16 · Effective 2026-10-16 · Governing entity: Logiqum Kft. (Logiqum Korlátolt Felelősségű Társaság), 2094 Nagykovácsi, Berkenye utca 8., Hungary · Company reg. no. 13-09-246330 · Tax no. 33020983-2-13**
 
-By downloading, installing, or running the Software you accept this Agreement.
-If you do not accept it, do not use the Software.
+This End User License Agreement ("**Agreement**") is a binding contract between **Logiqum Kft.**
+("**Logiqum**", "we", "us") and the individual or entity that installs, downloads, accesses, or uses
+the Software ("**Customer**", "you"). **By installing, downloading, activating, or using the Software,
+you agree to this Agreement.** If you are accepting on behalf of an organization, you represent that you
+have authority to bind it. If you do not agree, do not install or use the Software. This Agreement is
+for business use; the Software is not intended for consumers.
+
+---
 
 ## 1. Definitions
-- **Software** — the LUnA (logrok universal agent) binaries, packages, container
-  images, and accompanying documentation distributed by Logiqum.
-- **Core** — the free capability set the Software runs with **no license** (file
-  tail, syslog-in, journald, HTTP-in, parsers, TLS syslog output, metrics).
-- **Apex** — the paid capability set: every capability of the Software that is
-  not Core (incl. Windows Event Log, ETW, WMI, Linux audit, MQTT ingest, disk
-  store-and-forward spool, central fleet management, edge reduction, redaction,
-  enrichment, per-agent mTLS, ack'd relay, Kubernetes container-log, macOS
-  unified-log, UDP/data-diode output, multi-destination fan-out, SNMP trap and
-  Modbus collection, every output destination other than RFC 5424 syslog, and
-  experimental OS architectures).
-- **Agent** — one running instance of the Software on one host. Counting is
-  **per Agent, not per container or per source.**
-- **Entitlement** — a Logiqum-signed grant (enrollment-derived from a licensed
-  logrok deployment, or a standalone signed license file) that authorizes Apex
-  for a stated tier, Agent count, and term.
-- **Non-commercial use** — personal, educational, research, or evaluation use not
-  undertaken for or in connection with commercial advantage or monetary
-  compensation.
 
-## 2. License grant
-Subject to your compliance with this Agreement, Logiqum grants you a limited,
-non-exclusive, non-transferable, revocable license to install and run the
-Software as follows:
+- **Software** — the Logiqum log-intelligence platform ("**logrok**") and the Logiqum universal agent
+  ("**LUnA** / logrok-universal-agent"), the **Converter** and the **Tools** (both defined below), in
+  object-code form, plus Documentation and any updates we provide. The Software is **proprietary and closed-source**; it is licensed, not sold.
+- **Agent** — the LUnA endpoint software component.
+- **Converter** — `luna-migrate`, the separate configuration-converter tool that Logiqum publishes with
+  each LUnA release, together with its Go packages and mapping logic, and any successor or similar
+  converter we ship.
+- **Tools** — the Logiqum command-line and helper programs that ship with the Software, such as
+  `logrokctl` and the other administration, diagnostic, import, and validation utilities in the
+  distribution, whether or not the Documentation lists each one.
+- **Converted Configuration** — the configuration files and reports a Converter or Tool produces from
+  Customer's own input configuration. Converted Configuration is Customer Data: Customer owns it and
+  may use, modify, and keep it after this Agreement ends. The Converter, the Tools, and their mapping
+  logic, rules, and tables are Software and Logiqum Content, and are not Customer Data even though
+  Converted Configuration is produced by them.
+- **Documentation** — the then-current published usage documentation for the Software.
+- **Order** — an order form, quote, or online purchase referencing this Agreement that specifies the
+  purchased tier, term, quantities (e.g. agents / Log Source Hosts), and Fees.
+- **Entitlement** — the cryptographically-signed license record that authorizes a tier and/or
+  capabilities, verified by the Software **offline** (see §4).
+- **Free Tier ("Core")** — the no-charge capability level defined in the Documentation.
+- **Paid Tier ("Apex")** — the paid capability level, unlocked by a valid Entitlement per an Order.
+- **Evaluation** — a time-limited, no-charge grant of Paid-Tier capabilities for assessment.
+- **Customer Data** — log data, events, and other content that Customer or its systems feed into or
+  store with the Software, and results the Software derives from it for Customer.
+- **Affiliate** — an entity that controls, is controlled by, or is under common control with a party,
+  where control means owning more than 50% of the voting interests.
+- **Authorized Users** — Customer's and its Affiliates' employees and individual contractors whom
+  Customer permits to use the Software on Customer's behalf.
+- **Open-Source Component** — any software, library, rule set, or data file included with or used by
+  the Software that is made available under an open-source or other public license (for example, the
+  GNU GPL or LGPL, Apache 2.0, MIT, BSD, MPL, AGPL, or the Detection Rule License), as listed in the
+  third-party notices and open-source inventory published in the Documentation.
+- **Logiqum Interfaces** — the non-public communication protocols, message and wire formats, APIs,
+  file and storage formats, and license-file formats used by or between components of the Software
+  (for example, Agent enrollment, configuration, heartbeat, and relay exchanges with the control
+  plane, on-disk spool and buffer formats, and the Entitlement format), excluding open standards the
+  Software implements (such as RFC 5424 syslog, OTLP, or HTTP) and interfaces the Documentation
+  publishes for customer integration.
+- **Logiqum Content** — the detection rules, correlation logic, parsers, models, dashboards, reports,
+  templates, and other content that Logiqum authors and ships with or for the Software, excluding
+  Open-Source Components.
+- **Operational Data** — non-content telemetry about the Software's own operation (see §5); expressly
+  **not** Customer's log data or other Customer Data.
 
-- **2.1 Core — free.** You may run the Software's **Core** capabilities at no
-  charge for: (a) **Non-commercial use**; (b) use **together with a validly
-  licensed logrok deployment**; and (c) **commercial use up to 10 Agents** (the
-  "free commercial floor"). Core has no Agent limit for (a) and (b).
-- **2.2 Apex — requires an Entitlement.** Apex capabilities require a valid
-  Entitlement — either issued automatically to an Agent enrolled with a licensed
-  logrok deployment (**free with logrok**), or a **standalone commercial**
-  Entitlement purchased from Logiqum. Your use of Apex is limited to the tier,
-  Agent count, and term stated in your Entitlement or applicable order.
-- **2.3 Grace and degradation.** When a paid Entitlement expires, Apex
-  capabilities continue for a **grace period (default 30 days)**, after which the
-  Software **degrades to Core** and continues running. The Software never ceases
-  operating, and never grants more than Core without a valid Entitlement.
-- **2.4 Notice period for newly enforced Apex capabilities.** Where a capability
-  is Apex but an earlier release of the Software did not enforce it, the Software
-  will warn about unlicensed use of that capability but will not disable it
-  before the next major version. Core is not reduced: a capability listed as Core
-  in §1 stays free.
+## 2. License grant (tiered)
 
-## 3. Restrictions
-You may not: (a) redistribute, resell, rent, lease, sublicense, or host the
-Software as a service to third parties; (b) reverse-engineer, decompile, or
-disassemble the Software, except to the extent applicable law or a third-party
-component's license expressly permits; (c) remove or alter proprietary notices;
-(d) circumvent, disable, or tamper with the entitlement or its enforcement; or
-(e) use the Software beyond the scope granted in §2.
+Subject to this Agreement, Logiqum grants Customer a **revocable, limited, non-exclusive,
+non-transferable, non-sublicensable** license to install and use the Software, as follows:
 
-## 4. Ownership
-The Software is proprietary to and a trade secret of Logiqum, protected by law.
-Logiqum reserves all rights not expressly granted. No title passes to you.
+- **(a) Free Tier ("Core")** — you may use the Free-Tier capabilities of the Software at no charge if
+  **any** of the following applies: (i) your use is **non-commercial**; (ii) the Agent is used together
+  with a validly-licensed logrok deployment ("**bundled with logrok**"); or (iii) your commercial,
+  standalone use does not exceed **ten (10)** Agents. This is a perpetual grant for so long as you
+  comply with this Agreement.
+- **(b) Paid Tier ("Apex")** — you may use the Paid-Tier capabilities during the term of, and to the
+  quantities stated in, an Order for which Fees are paid, unlocked by your Entitlement.
+- **(c) Evaluation** — if we provide an Evaluation, you may use the stated capabilities for the
+  evaluation period, solely for **internal evaluation** in a non-production capacity. Evaluations are
+  provided **AS IS** with no warranty, support, indemnity, or SLA (§8, §9, §10 notwithstanding, the
+  liability cap for Evaluation is **US$500**).
+- **(d) Bundled with logrok** — where the Agent is bundled with a logrok subscription, the Agent
+  capabilities licensed by that subscription carry **no separate Agent fee**; the applicable logrok
+  Order governs quantities (e.g. Log Source Hosts).
 
-## 5. No telemetry
-The Software validates its Entitlement **entirely offline** and does **not** phone
-home, call a licensing portal, or transmit usage or telemetry to Logiqum for
-licensing purposes. It is designed to run in fully air-gapped environments.
+Use exceeding your Entitlement or the conditions above requires a corresponding Order.
 
-## 6. Third-party components
-The Software includes components under the Apache License 2.0 (notably the Windows
-Event Log reader derived from the OpenTelemetry Collector). Those components remain
-governed by their own licenses; see NOTICE and LICENSE-APACHE-2.0.txt. This
-Agreement governs the work as a whole except where a third-party license governs a
-specific component.
+**(e) Internal business purposes.** Every grant in this §2 is for Customer's **internal business
+purposes** only — processing Customer's own data, and data Customer is lawfully entitled to process, for
+Customer's own operations — unless an Order expressly authorizes use on behalf of third parties (for
+example, a managed-security-service Order). A license granted for one purpose (for example, a Free-Tier,
+Evaluation, development, or non-production instance) may not be used for another (for example,
+production, marketing, demonstration to third parties, or competitive work).
 
-## 7. Term and termination
-This Agreement applies for as long as you use the Software. Logiqum may terminate
-the Apex grant on your material breach; on termination of an Apex grant the
-Software reverts to Core. Sections 3, 4, 8, 9, and 12 survive termination.
+**(f) Authorized Users and Affiliates.** Customer may let Authorized Users, including contractors
+operating the Software for Customer, use the Software on Customer's behalf. Customer is responsible for
+their compliance and is liable for their acts and omissions as for its own.
 
-## 8. Warranty disclaimer
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
-NON-INFRINGEMENT.
+## 3. Capability enforcement by license key
 
-## 9. Limitation of liability
-TO THE MAXIMUM EXTENT PERMITTED BY LAW, LOGIQUM WILL NOT BE LIABLE FOR ANY
-INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES, OR LOST PROFITS OR DATA.
-LOGIQUM'S TOTAL LIABILITY UNDER THIS AGREEMENT WILL NOT EXCEED THE GREATER OF THE
-FEES YOU PAID TO LOGIQUM FOR THE SOFTWARE IN THE TWELVE (12) MONTHS PRECEDING THE
-CLAIM, OR ONE HUNDRED EUROS (€100).
+Capabilities above the Free Tier are gated by the Entitlement / license-key functionality in the
+Software. You may **not** move, change, disable, remove, obscure, or otherwise circumvent that
+functionality, nor use or access any capability you are not licensed for. Circumventing the license-key
+functionality is a **material breach** of this Agreement.
 
-## 10. IP indemnity (paying customers)
-Logiqum will defend any paying customer against third-party claims that the
-Software as delivered infringes their intellectual-property rights, and pay
-resulting costs and damages finally awarded, subject to your prompt written notice
-and reasonable cooperation. This obligation does not apply to claims arising from
-modification of the Software, its combination with anything not supplied by
-Logiqum, or use outside the scope of this Agreement.
+Without limiting the above, you will not: (a) create, alter, forge, or share license files or
+Entitlements, or use an Entitlement issued for another person or deployment; (b) tamper with clocks,
+trial or grace-period state, installation fingerprints, or counters the Software uses to apply its
+Entitlement; (c) start a further Evaluation for the same deployment by reinstalling, wiping, cloning, or
+otherwise resetting it; (d) exceed, or disguise use above, the licensed quantities (for example, by
+aggregating many sources behind one counted source to avoid counting them); or (e) distribute or use any
+tool, patch, or instruction whose purpose is to do any of the above. That the Software cannot
+technically prevent an action does not make the action permitted.
 
-## 11. Export compliance
-You will comply with all applicable export-control and sanctions laws in your use
-of the Software.
+## 4. Offline licensing — no phone-home
 
-## 12. Governing law
-This Agreement is governed by the laws of Hungary, without regard to
-conflict-of-laws rules, and the parties submit to the exclusive jurisdiction of
-the courts of Budapest, Hungary. Nothing in this Agreement limits any mandatory
-statutory rights you have as a consumer under the laws of your country of
-residence that cannot be waived or excluded by contract.
+The Software is **air-gapped-ready by design**. The Entitlement is verified **entirely offline** by
+cryptographic signature; the Software **does not require, and the license grant is not conditioned on,
+any connection to Logiqum or any external license server**. For air-gapped or disconnected deployments,
+Logiqum provides an **offline license file** that the operator installs; the Software verifies it locally
+and, on validity, unlocks the licensed tier. Expiry or invalidity of an Entitlement causes the Software
+to **fall back to the Free Tier**, not to cease functioning. No feature of this Agreement obligates the
+Software to "call home" to remain licensed.
 
-## 13. Entire agreement
-This Agreement, together with any Logiqum order or quote for Apex (which controls
-price, Agent count, and term), is the entire agreement on its subject matter and
-supersedes prior understandings.
+## 5. Telemetry — opt-in, and never license-gating
+
+The Software **does not transmit Operational Data to Logiqum by default.** Optional product telemetry
+may be **enabled by the operator** ("opt-in"); when enabled, it transmits only **Operational Data**
+(e.g. Software version, enabled-feature flags, error and throughput counts) and **never Customer log
+content or personal data of data subjects**. Operator may disable it at any time, and it is disabled in
+air-gapped deployments. **Disabling or the unavailability of telemetry does not disable, degrade, throttle,
+or otherwise affect the Software or the license.** Managed-agent enrollment, heartbeat, and metrics are
+exchanged only with **Customer's own** logrok control plane and remain within Customer's environment;
+they are not transmitted to Logiqum. Operational Data that Customer opts to share is not Customer Data.
+
+## 6. Restrictions
+
+### 6.1 Use restrictions
+
+Except as this Agreement or an Order expressly permits, and subject always to §6.2 and §6.3, you will
+not, and will not permit or help anyone else to:
+
+- **(a) Copy or modify.** Copy the Software (other than reasonable copies for licensed installation,
+  backup, disaster recovery, and non-production testing within your Entitlement), or modify, translate,
+  adapt, or create derivative works of it.
+- **(b) Distribute or host for others.** Rent, lease, lend, sell, resell, sublicense, assign, distribute,
+  publish, or otherwise make the Software available to any third party, or use it to provide a service
+  bureau, time-sharing, hosted, or managed service to third parties.
+- **(c) Reverse engineer.** Reverse engineer, decompile, disassemble, decrypt, or otherwise attempt to
+  derive the source code, underlying structure, algorithms, or non-public design of the Software,
+  **including by analyzing, capturing, replaying, or emulating Logiqum Interfaces** (for example,
+  inspecting Agent-to-control-plane traffic or license files in order to reimplement either side), or by
+  analyzing its file, storage, spool, or license-file formats.
+- **(d) Circumvent.** Circumvent the license-key functionality or Entitlement limits (§3), or any
+  technical measure that protects the Software or its integrity (such as code signing or configuration
+  signatures).
+- **(e) Notices.** Remove, alter, or obscure any copyright, trademark, license, or other proprietary
+  notice in or on the Software or Documentation.
+- **(f) Compete.** Access or use the Software, Documentation, or Logiqum Content to build, train,
+  improve, or operate a competing product or service, to perform competitive analysis, or to copy its
+  ideas, features, functions, interfaces, or user-interface design.
+- **(g) Publish benchmarks.** Disclose to any third party the results of any benchmark, performance,
+  capacity, or comparative test of the Software without Logiqum's prior written consent. You may run such
+  tests for your own internal evaluation and share the results within your organization and with your
+  professional advisers under confidentiality.
+- **(h) Extract content or train models.** Extract, scrape, or bulk-export Logiqum Content, the
+  Documentation, or the Software's code or interfaces in order to reproduce them outside the Software,
+  or use any of them (or output generated by the Software that reproduces them) as training,
+  fine-tuning, evaluation, or retrieval data for any machine-learning or artificial-intelligence model,
+  other than a model used by the Software itself as provided. This does not restrict your use of
+  Customer Data or of analytic results about Customer Data.
+- **(i) Unlawful use.** Use the Software in violation of applicable law, including data-protection,
+  privacy, interception, and employee-monitoring laws, or to collect data from systems or persons you are
+  not authorized to monitor.
+- **(j) Exceed scope.** Use the Software beyond the tier, quantities, term, purposes, or deployment
+  your Entitlement and Order allow.
+- **(k) AI-assisted replication.** Use any large language model, AI coding assistant, autonomous or
+  semi-autonomous AI agent, or other automated system to observe, map, describe, specify, or reproduce
+  the Software, its features, functions, workflows, user interface, Logiqum Interfaces, Logiqum Content,
+  or Documentation, in order to create, or help create, a product, service, or component that is
+  substantially similar to or competes with the Software or any part of it. This includes: (i) feeding
+  the Software's code, binaries, configuration it generates, output, screens, traffic, or Documentation
+  into such a system as input, context, or a specification for that purpose; (ii) directing such a
+  system to operate or probe the Software (through its user interface, APIs, or Logiqum Interfaces) to
+  systematically catalogue its behavior for that purpose; and (iii) any "clean-room" or
+  specification-first process in which such a system, or a person relying on its output, had that
+  access. A process does not become permitted because a person, rather than the AI system, writes the
+  final code, or because the result is described as an independent implementation. This does not
+  restrict using AI tools to operate, configure, or troubleshoot the Software for your licensed
+  purposes, to build integrations through interfaces the Documentation publishes, or to analyze
+  Customer Data.
+
+Each of the restrictions above is separate and independent. §6.1(f), §6.1(g), and §6.1(k) survive
+termination.
+
+### 6.2 Rights that applicable law guarantees (interoperability)
+
+Nothing in this Agreement restricts any act that applicable law permits notwithstanding a contractual
+prohibition, and §6.1 is to be read as applying only to the extent the law allows. In particular, where
+Directive 2009/24/EC on the legal protection of computer programs, or a national law implementing it,
+applies: (a) a person entitled to use the Software may observe, study, or test its functioning while
+performing acts they are entitled to perform, in order to determine the ideas and principles underlying
+any element of it; and (b) a licensee, or a person authorized to act on its behalf, may reproduce and
+translate the code where indispensable to obtain the information necessary to achieve interoperability
+of an independently created program with the Software, provided that the information is not already
+readily available to them, the acts are confined to the parts of the Software necessary for
+interoperability, and the information obtained is used only for that purpose and is not given to others
+or used to develop a substantially similar program, except as that law allows.
+
+**Ask us first.** Logiqum publishes the interfaces intended for customer integration in the
+Documentation and will, on written request to contact@logiqum.com, provide reasonably available
+interoperability information you are entitled to under applicable law, on reasonable confidentiality
+terms. Providing it on request does not condition any statutory right you have.
+
+### 6.3 Open-Source Components
+
+Open-Source Components are licensed to you under their own licenses, not under this Agreement. **Nothing
+in this Agreement limits, and none of its restrictions (including §6.1(a), (c), and (h)) applies to, any
+right you have under the license of an Open-Source Component**, and where this Agreement conflicts with
+such a license as to that component, the open-source license governs that component. In particular:
+
+- Where an Open-Source Component's license entitles you to its corresponding source code (for example,
+  the GNU GPL or LGPL), Logiqum's written offer of that source, as stated in the Documentation, applies
+  and is not affected by this Agreement.
+- Where the Software uses a library under the GNU LGPL, you may modify that library for your own use and
+  reverse engineer the Software to the extent necessary to debug such modifications, as that license
+  requires.
+- Logiqum provides Open-Source Components "AS IS" as part of the Software; §8 and §10 apply to them to
+  the extent the applicable open-source license permits.
+
+The Software as a whole, and every part of it that is not an Open-Source Component, remains subject to
+this Agreement.
+
+### 6.4 Security testing and vulnerability reports
+
+You may perform security testing (including vulnerability scanning and penetration testing) of your own
+deployment of the Software. You will report suspected vulnerabilities in the Software to Logiqum as
+described in the security policy in the Documentation and allow a reasonable coordinated-disclosure
+period before disclosing them publicly. Security testing does not authorize any act otherwise
+restricted by §6.1(b), (d), or (f).
+
+## 7. Ownership
+
+The Software is licensed, not sold. Logiqum and its licensors retain all right, title, and interest in
+and to the Software, Documentation, and all intellectual property therein. Customer retains all right,
+title, and interest in Customer Data. Logiqum reserves all rights not expressly granted in this
+Agreement; no right is granted by implication or estoppel. The Software, its structure and
+organization, the Logiqum Interfaces, and Logiqum Content are Logiqum's trade secrets and copyrighted
+works.
+
+**Feedback.** You are never required to give Logiqum suggestions, ideas, bug reports, or other feedback
+about the Software ("**Feedback**"). If you do, you grant Logiqum a perpetual, irrevocable, worldwide,
+royalty-free, transferable, and sublicensable license to use, disclose, and exploit the Feedback for any
+purpose, without obligation or attribution to you. Feedback is not your Confidential Information, but
+Logiqum will not identify you as its source without your consent. Feedback does not include Customer
+Data.
+
+**Operational Data.** Where Customer opts in to telemetry (§5), Logiqum may use Operational Data to
+operate, support, secure, and improve the Software and may publish it only in aggregated form that
+identifies neither Customer nor any individual.
+
+## 8. Warranty & disclaimer
+
+For **paid** Software, Logiqum warrants that, for **ninety (90) days** after initial delivery, the
+Software will operate in material conformance with the Documentation; your sole remedy for breach is that
+Logiqum will use commercially reasonable efforts to correct the non-conformance or, failing that, refund
+the Fees for the non-conforming Software. **Except for the foregoing, the Software is provided "AS IS"
+and "AS AVAILABLE", and Logiqum disclaims all other warranties, express, implied, or statutory, including
+merchantability, fitness for a particular purpose, title, and non-infringement, and does not warrant that
+operation will be uninterrupted or error-free.** Free-Tier and Evaluation use is provided "AS IS" with no
+warranty. The Software is not designed for use where failure could cause death, personal injury, or
+severe physical or environmental damage.
+
+## 9. Indemnification
+
+**(a) By Logiqum.** Logiqum will defend Customer against a third-party claim that a **paid** version of
+the Software, used per this Agreement and the Documentation and unmodified, infringes that third party's
+patent, copyright, or trademark, and will pay damages finally awarded or agreed in settlement. This
+indemnity is available to **all paying customers** (no minimum-spend threshold). If the Software is or may
+be enjoined, Logiqum may procure the right to continue use, modify or replace it, or terminate and refund
+the unused prepaid Fees. Exclusions: claims arising from Customer modifications, combination with non-
+Logiqum products, use outside the Documentation, or Customer Data. This §9(a) states Logiqum's entire
+liability and Customer's exclusive remedy for infringement. **(b) By Customer.** Customer will defend
+Logiqum against third-party claims arising from Customer Data or Customer's use in violation of law or
+this Agreement. Each indemnity is conditioned on prompt notice, sole control of defense (with the other
+party's reasonable cooperation), and no settlement admitting the indemnified party's liability without
+consent.
+
+## 10. Limitation of liability
+
+**To the maximum extent permitted by law: (a) neither party is liable for any indirect, incidental,
+special, consequential, punitive, or exemplary damages, or for lost profits, revenue, or data; and (b)
+each party's total aggregate liability under this Agreement will not exceed the Fees paid by Customer for
+the Software giving rise to the liability in the twelve (12) months preceding the event** (for Free-Tier
+use where no Fees are paid, **US$1,000**; for Evaluation, **US$500**). **Excluded from the cap and
+the waiver in (a):** amounts owed under an Order; the parties' indemnity obligations (§9); a party's
+breach of the other's intellectual-property rights or of confidentiality; and fraud, gross negligence, or
+willful misconduct. Nothing limits liability that cannot be limited under applicable (including EU
+consumer/mandatory) law.
+
+## 11. Confidentiality
+
+Each party will protect the other's non-public information disclosed under this Agreement with reasonable
+care and use it only to perform this Agreement, excluding information that is public, independently
+developed, or rightfully received without duty of confidence. Logiqum's Confidential Information
+includes the Software's non-public code, internals, and design; the Logiqum Interfaces; license files
+and Entitlements; non-public Documentation; the results of any benchmark or test of the Software
+(§6.1(g)); and Logiqum's pricing, Order terms, and roadmap. The receiving party will limit access to
+those of its personnel, Affiliates, and advisers who need it for this Agreement and are bound by
+confidentiality obligations at least as protective, and is responsible for their compliance. A party
+may disclose Confidential Information when required by law, regulation, or court order, after giving
+the other party prompt notice where lawful and reasonable help to seek protective treatment. These
+obligations last for the term of this Agreement and **five (5) years** after it ends, and for trade
+secrets for as long as they remain trade secrets. On termination, or on request, the receiving party
+will return or destroy the other's Confidential Information, except copies retained in routine backups
+or as required by law, which remain protected. Customer Data is Customer's Confidential Information.
+
+## 12. Term, termination & data
+
+This Agreement applies while you use the Software or during any Order term. Either party may terminate for
+the other's material breach not cured within **30 days** of notice. On termination you must stop using and
+delete the paid Software. Where Logiqum holds any Customer Data (e.g. in a support context), Customer has
+**30 days** after termination to retrieve it, after which Logiqum may delete it in the ordinary course.
+Termination does not relieve accrued payment obligations.
+
+**Breach of license restrictions.** If Customer breaches §3 or §6.1 (other than an inadvertent quantity
+overage that Customer corrects under §13), Logiqum may, on written notice, terminate this Agreement and
+every license under it, **including the Free-Tier grant**, if the breach is not cured within **30 days**
+of the notice (or immediately, where the breach cannot be cured). Use of the Software in breach of
+§3 or §6.1 is outside the scope of the license.
+
+**Suspension of services.** The Software keeps running under its offline Entitlement (§4) and Logiqum
+does not disable it remotely. While a material breach (including non-payment) remains uncured after
+notice, Logiqum may suspend support, updates, upgrade bundles, and the issuance or renewal of
+Entitlements, without liability and without reducing Fees due.
+
+**On termination**, Customer will stop using the affected Software, delete or destroy all copies in its
+possession or control (except Open-Source Components, which Customer keeps under their own licenses),
+and, on Logiqum's request, certify in writing that it has done so.
+
+§§3, 6.1(f)–(h), 6.3, 7, 8 (disclaimer), 9–11, 13–14, 17, and 18 survive termination.
+
+## 13. Verification (audit)
+
+No more than **once in any 12-month period** and on **at least 15 days'** written notice, Logiqum may
+verify Customer's compliance with the licensed quantities and tier, including by requesting a signed
+compliance certification. If verification reveals use exceeding the Entitlement, Customer will promptly
+order and pay for the excess at Logiqum's then-current list prices (or the Order's prices, if lower),
+retroactive to when the excess began. Customer will keep records reasonably sufficient to show its
+compliance during the term and for **two (2) years** after it. If a signed certification is not
+reasonably sufficient, Logiqum may have an independent auditor, bound by confidentiality, review those
+records during normal business hours with minimal disruption and in compliance with Customer's
+reasonable security and site policies (including for air-gapped sites, where Customer may provide the
+evidence by offline means). Logiqum bears the cost of verification unless it reveals underpayment of
+more than **five percent (5%)** for the period reviewed, in which case Customer reimburses its
+reasonable cost. Verification is Logiqum's audit backstop; it is not a condition of the
+license and does not require the Software to transmit data (§4–§5).
+
+## 14. AI features
+
+Where the Software provides AI-assisted features: **Logiqum does not use, and does not permit any model
+provider to use, Customer Data or Customer inputs to train or fine-tune foundation models.** AI output may
+be inaccurate or incomplete and must not be solely relied upon; Customer is responsible for validating
+output before acting on it. Any third-party model providers used are disclosed in the Documentation /
+Privacy Policy.
+
+## 15. Data protection
+
+To the extent Logiqum processes personal data on Customer's behalf, the parties' **Data Processing
+Addendum** (available from Logiqum on request at contact@logiqum.com) applies and is incorporated by reference; it includes EU Standard Contractual Clauses
+for any restricted transfers. Consistent with §5, the self-managed Software is designed so that Customer
+log data remains within Customer's environment.
+
+## 16. Compliance; export
+
+Customer will comply with applicable laws in its use of the Software, including EU and US **export-control
+and sanctions** laws; Customer will not use or export the Software in violation of those laws or to
+embargoed destinations or restricted parties. The Software contains encryption and may be subject to
+the EU Dual-Use Regulation (EU) 2021/821, the US Export Administration Regulations, and similar laws.
+Customer represents that it, its Authorized Users, and its Affiliates are not named on, or owned or
+controlled by a party named on, an applicable sanctions or restricted-party list, and will not use the
+Software for a prohibited end use (including weapons of mass destruction or, where the law so provides,
+military end use) without the authorizations the law requires.
+
+## 17. Governing law; jurisdiction
+
+This Agreement is governed by the laws of **Hungary** (excluding conflict-of-laws rules and the UN
+Convention on Contracts for the International Sale of Goods). Disputes are resolved as follows:
+
+- **Customers established in the European Union or the European Economic Area:** the parties submit to
+  the exclusive jurisdiction of the competent courts of **Budapest, Hungary**.
+- **All other Customers:** any dispute arising out of or in connection with this Agreement is finally
+  settled by arbitration before the **Commercial Arbitration Court attached to the Hungarian Chamber of
+  Commerce and Industry**, Budapest, under its rules in force when the proceedings start, by a sole
+  arbitrator, in the **English** language, with its seat in **Budapest**.
+
+The parties may agree in an Order to a different governing law and venue (for example, for US-based
+Customers). Nothing prevents
+either party from seeking injunctive or other equitable relief in any competent court for a breach or
+threatened breach of the other's intellectual-property rights, of confidentiality (§11), or of §3 or
+§6.1. Each party agrees that such a breach is likely to cause the other irreparable harm for which money
+damages would not be an adequate remedy, and, to the extent the law of the court allows, that relief
+may be sought without proving actual damage and without posting a bond.
+
+## 18. General
+
+Neither party may assign this Agreement without the other's consent, except to a successor of its business
+(with notice). If any provision is unenforceable, the rest remains in effect. This Agreement (with any
+Order, DPA, and Documentation referenced) is the entire agreement and supersedes prior understandings on
+its subject. Neither party is liable for delays caused by events beyond its reasonable control. Failure to
+enforce a provision is not a waiver. Notices must be in writing to the parties' designated contacts.
+Customer may not assign or transfer an Entitlement except together with an assignment of this Agreement
+permitted above.
+
+**Acceptance and versions.** You accept this Agreement as follows. (a) The appliance's first-boot
+screen shows this Agreement and requires an explicit acceptance; an unattended install requires an
+explicit `ACCEPT_EULA=yes` in its answer file. (b) The Agent, the Converter, the Tools, and
+self-deployed Software have no acceptance screen: installing or using them is acceptance, as stated
+at the top of this Agreement. (c) This Agreement is always available on the product's About page and
+is published with each release. A newer version applies to new installations, and to upgrades from the
+time it is published with that version; if you continue to use the Software after an upgrade, you accept
+the version shipped with that upgrade. Section 6.1 applies to the Converter and the Tools exactly as to
+the rest of the Software, including (c) (reverse engineering) and (k) (AI-assisted replication); the
+ownership of Converted Configuration stays with Customer as defined in §1.
+
+**Agent distributions.** The Agent is also distributed with its own license text. That text and this
+Agreement are intended to be consistent; where the Agent is used under a logrok Order, this Agreement
+governs to the extent of any conflict, and the restrictions in §3 and §6 (including those concerning
+Logiqum Interfaces between the Agent and the control plane) apply to the Agent.
+
+**US Government end users.** The Software and Documentation are "commercial computer software" and
+"commercial computer software documentation" developed exclusively at private expense. Under FAR 12.212
+and DFARS 227.7202 (or equivalent agency provisions), US Government end users acquire only the rights
+this Agreement grants to all other customers.
+
+---
+
+*Contact: contact@logiqum.com. Companion documents: Privacy Policy; Data Processing Addendum on request.*

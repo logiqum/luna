@@ -3,10 +3,12 @@
 How the agent decides which capabilities it may run. The model is **offline-first**
 (no phone-home), so it works in air-gapped and OT environments.
 
-> **The binding terms are in [`LICENSE`](../LICENSE), not in this document.** This guide explains the
-> *mechanics* — how entitlements are delivered, verified, and enforced. What you are permitted to run,
-> and on how many agents, is stated in the End-User License Agreement itself. Where the two ever appear
-> to differ, `LICENSE` governs; please read it rather than relying on any summary, including this one.
+> **The binding terms are in [`LICENSE`](../LICENSE) — the Logiqum End User License Agreement, one
+> agreement for LUnA (Logrok Universal Agent), `luna-migrate` and logrok.** Installing or using LUnA means you accept it. This guide
+> explains the *mechanics* — how entitlements are delivered, verified, and enforced. The Agreement defines
+> the free tier ("Core") by reference to the Documentation: the Core and Apex contents in §1 below are that
+> definition. On everything else, where the two ever appear to differ, `LICENSE` governs; please read it
+> rather than relying on any summary, including this one.
 
 ## 1. The model
 
@@ -21,22 +23,24 @@ The free **Core** tier always runs with **no license at all**; every gated capab
 | Tier | Contents |
 |---|---|
 | **Core** (free) | file tail · syslog-in · journald · HTTP-in · parsers (json/csv/kv/xml/expr/add_fields/filter) · TLS syslog output (including `failover_endpoints` / `failback_every` — one destination, made reliable) · metrics |
-| **Apex** (paid) | **Windows Event Log** · ETW · WMI · Linux audit (`linux_audit`) · MQTT ingest (`mqtt_in`) · disk store-and-forward spool · central fleet management · edge reduction (sample/throttle/dedup/trim_fields/quota/adaptive_sample) · redaction (`redact`) · enrichment (`lookup`) · per-agent enrolled mTLS · ack'd relay transport · Kubernetes container-log collector · macOS unified-log (`oslog`) · UDP / data-diode output · **multi-destination fan-out** (more than one output) · SNMP trap/inform receiver (`snmptrap_in`) · Modbus (`modbus_in`) · Solaris BSM audit trail (`bsm_audit`) · file-content hashing (`file_hash`) · noise enforcement at the source (`noise_fingerprint`) · **every destination other than RFC 5424 syslog** (`snare`/`hec`/`sentinel`/`xsiam`/`kafka`/`s3`/`loki`/`otlp`) · extended OS platforms (AIX/Solaris/BSD) |
+| **Apex** (paid) | **Windows Event Log** · ETW · WMI · Linux audit (`linux_audit`) · MQTT ingest (`mqtt_in`) · Beats receiver (`beats_in`) · Fluent Forward receiver (`fluent_in`) · OTLP logs receiver (`otlp_in`) · Splunk HEC receiver (`hec_in`) · GELF receiver (`gelf_in`) · OpenWEC receiver (`openwec_in`) · disk store-and-forward spool · central fleet management · edge reduction (sample/throttle/dedup/trim_fields/quota/adaptive_sample/aggregate) · redaction (`redact`) · enrichment (`lookup`) · per-agent enrolled mTLS · ack'd relay transport · Kubernetes container-log collector · macOS unified-log (`oslog`) · UDP / data-diode output · **multi-destination fan-out** (more than one output, or a `when:` routing condition on any output — even a single one) · SNMP trap/inform receiver (`snmptrap_in`) · Modbus (`modbus_in`) · Solaris BSM audit trail (`bsm_audit`) · file-content hashing (`file_hash`) · noise enforcement at the source (`noise_fingerprint`) · **every destination other than RFC 5424 syslog** (`snare`/`hec`/`sentinel`/`xsiam`/`kafka`/`s3`/`loki`/`otlp`/`elasticsearch`/`beats`/`fluent`) · extended OS platforms (AIX/Solaris/BSD) |
 
 **The dividing line, in one sentence:** Core collects from the host and forwards **one open
 standard — RFC 5424 syslog over TCP/TLS — to one destination**. Anything that reads a privileged or
 proprietary OS subsystem, or speaks a named vendor or platform API, is Apex. TLS is never gated:
 encryption is not a paid feature.
 
-### Modules newly marked Apex (notice period)
+### Modules marked Apex in 1.2.0 (notice period ended in 2.0.0)
 
 Fifteen modules were Apex by this definition but were not marked or checked in earlier releases:
 `etw`, `wmi`, `linux_audit`, `mqtt_in`, `redact`, `lookup`, `adaptive_sample`, and the eight
-non-syslog outputs (`snare`, `hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`).
+non-syslog outputs (`snare`, `hec`, `sentinel`, `xsiam`, `kafka`, `s3`, `loki`, `otlp`). The
+`elasticsearch`, `beats` and `fluent` outputs, added in 2.0.0, are non-syslog destinations too and run under the same terms.
 
-They are now marked and reported, but **not withdrawn**: an unlicensed agent using them warns, reports
-posture `degraded`, and keeps running them until the next **major** version. See §6. **Core did not
-change** — nothing that was free has been removed from it.
+From 1.2.0 through 1.x they were marked and reported but **not withdrawn**: an unlicensed agent using
+them warned, reported posture `degraded`, and kept running them. **That notice period ended in 2.0.0**:
+they are now enforced like every other Apex module, so an unlicensed agent has them removed at start (§6).
+**Core did not change** — nothing that was free has been removed from it.
 
 Legacy tier names from earlier license files (`orbit`, `supra`) still parse and resolve to Apex.
 
@@ -48,7 +52,7 @@ Legacy tier names from earlier license files (`orbit`, `supra`) still parse and 
 2. **Standalone commercial — a signed license file.** Point the agent at a `.lic`:
    ```yaml
    licensing:
-     license_file: /etc/logrok-agent/agent.lic
+     license_file: /etc/logrok-universal-agent/agent.lic
    ```
 3. **No license → free Core.** Omit both and the agent runs Core (also the non-commercial path).
 
@@ -93,9 +97,9 @@ informational `customer`/`license_id`/`issued_at`.
 
 | Source | Location |
 |---|---|
-| Standalone license file | wherever `licensing.license_file` points (convention: `/etc/logrok-agent/agent.lic`, or `C:\ProgramData\logrok-universal-agent\agent.lic`). Operator-managed; survives upgrades. |
-| Enrollment-derived | persisted inside the agent **state file** (`agent-state.json`, next to the config by default) as the `entitlement` field — written at enrollment, re-verified offline on every load. |
-| Issuer **public** key | embedded in the agent binary — release binaries embed only the production key. |
+| Standalone license file | wherever `licensing.license_file` points (convention: `/etc/logrok-universal-agent/agent.lic`, or `C:\ProgramData\logrok-universal-agent\agent.lic`). Operator-managed; survives upgrades. |
+| Enrollment-derived | persisted inside the agent **state file** (`agent-state.json`; by default in the service's state directory when the service manager provides one — the packaged systemd unit, the FreeBSD rc script and the container image all do — otherwise next to the config) as the `entitlement` field — written at enrollment, re-verified offline on every load. |
+| Issuer **public** key | embedded in the agent binary (the production key, `logrok-prod-1`). |
 | Issuer **private** key | **never in the agent** — held offline by the vendor. Only the holder of the private key can mint a license or certify a control plane's signing key. |
 | Control-plane signing key | held by your control plane, certified by the vendor for your licence; used to sign the entitlements, enrollment bundles and upgrade offers it hands to agents. |
 
@@ -114,8 +118,9 @@ entitlement. Two invariants hold in every state:
 
 - **Licensing never crashes or stops the agent.** The worst outcome is running with fewer
   features, never not running.
-- **Core capabilities are never blocked.** An absent, invalid, or expired license means
-  Core — the same as no license.
+- **Core capabilities are never blocked.** An absent or invalid license means
+  Core — the same as no license. An expired license keeps its Apex features running until its
+  grace window ends (see the `grace` state below), and means Core after that.
 
 The four states (visible on `/metrics` as `logrok_agent_license_state` and, for managed
 agents, on every heartbeat):
@@ -125,12 +130,13 @@ agents, on every heartbeat):
 | `core` | the config uses no Apex capability | nothing to license; runs as-is |
 | `licensed` | a valid entitlement covers every Apex capability in use (paid or active trial) | runs as-is |
 | `grace` | the entitlement covered these capabilities but has expired, and the grace window is still open | Apex features **keep running**, with an escalating warning and a day counter (`logrok_agent_license_grace_days_left`). The grace window ends at the license's `graced_until`, or 30 days after `expiry` if unset |
-| `degraded` | the grace window has ended, or the entitlement never covered these capabilities | the unlicensed Apex modules are **withdrawn** (degrade-to-Core) — the disk spool as *drain-only*, see below; everything Core keeps running. Installing a valid license and restarting (or pushing a config reload) restores them immediately. **Exception — the notice period (§1):** a module inside its notice period is *reported* in this state but is **not** withdrawn; it keeps running until the next major version. A config using only those modules therefore reads `degraded` while its pipeline is entirely intact — that is the warning, and it is deliberate: reporting `licensed` would say the entitlement covers something it does not |
+| `degraded` | the grace window has ended, or the entitlement never covered these capabilities | the unlicensed Apex modules are **withdrawn** (degrade-to-Core) — the disk spool as *drain-only*, see below; everything Core keeps running. Installing a valid license and restarting (or pushing a config reload) restores them immediately. |
 
 What degrade-to-Core does, concretely: the unlicensed Apex inputs/processors/outputs are
 removed from the running pipeline, each removal logged at startup
 (`licensing: degraded to Core — unlicensed Apex features disabled`). An unlicensed
-multi-output (fan-out) config keeps its **first** output and drops the rest — forwarding
+multi-output (fan-out) config keeps its **first** output and drops the rest, and a `when:` routing
+condition is cleared (the surviving output then receives every event) — forwarding
 never stops entirely. A few capabilities are
 warned about but never disabled, because disabling them would be self-defeating: the
 fleet-management/enrollment plumbing (an agent must keep the path to *becoming* licensed) and

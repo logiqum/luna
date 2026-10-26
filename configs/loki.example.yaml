@@ -16,7 +16,7 @@ service:
 # windows (at-least-once). A 429 or 5xx keeps the batch here and retries it.
 buffer:
   enabled: true
-  dir: /var/lib/logrok-agent/spool
+  dir: /var/lib/logrok-universal-agent/spool
 
 inputs:
   - type: filetail
@@ -35,7 +35,7 @@ outputs:
     # gzip: true                   # compress pushes (WAN-friendly)
     # timeout: 10s                 # default
     # batch_max_bytes: 1048576     # default 1 MiB; larger batches split into several pushes
-    # dead_letter_dir: /var/lib/logrok-agent/loki-rejected   # payloads Loki permanently rejected
+    # dead_letter_dir: /var/lib/logrok-universal-agent/loki-rejected   # payloads Loki permanently rejected
 
 # --- Grafana Cloud variant -------------------------------------------------
 # Cloud puts the instance ID in the basic-auth user and the API token in the

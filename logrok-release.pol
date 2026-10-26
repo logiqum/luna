@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!DOCTYPE Policy SYSTEM "https://www.debian.org/debsig/1.0/policy.dtd">
+<Policy xmlns="https://www.debian.org/debsig/1.0/">
+  <Origin Name="Logrok Release Signing" id="B9BE1899A736BA2C4B3C23BF2BE47268770B0C3F" Description="LUnA release packages"/>
+  <Selection>
+    <Required Type="origin" File="debsig.gpg" id="B9BE1899A736BA2C4B3C23BF2BE47268770B0C3F"/>
+  </Selection>
+  <Verification MinOptional="0">
+    <Required Type="origin" File="debsig.gpg" id="B9BE1899A736BA2C4B3C23BF2BE47268770B0C3F"/>
+  </Verification>
+</Policy>

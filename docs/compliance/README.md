@@ -35,8 +35,8 @@ capabilities; a dedicated page can follow if healthcare deals need it.
   trail (`linux_audit` — process executions, file-access watches, logins); syslog-in.
 - **No-gap delivery:** disk store-and-forward (CRC-checked, bounded, `when_full` policies incl. `block`
   = zero-drop backpressure), at-least-once forwarding, automatic drain after outages.
-- **Tamper-evident spool (shipped 2026-07-05):** the disk spool is a keyed HMAC-SHA-256 hash chain over
-  every record and segment, **on by default** with an auto-generated local key — no operator setup
+- **Tamper-evident spool (shipped 2026-07-05):** the disk spool is tamper-evident (keyed HMAC-SHA-256),
+  **on by default** with an auto-generated local key — no operator setup
   required. Detection (not prevention): modification, deletion (including front-truncation — deleting the
   oldest segments of a backlog), insertion, or reordering of already-written spool content is evidenced,
   both live during drain (`spool_tamper="true"` on the affected event, a metric, a sticky heartbeat flag)
@@ -67,23 +67,21 @@ capabilities; a dedicated page can follow if healthcare deals need it.
   Ed25519 signing key and can forge manifests. The manifest makes evidence verifiable *off*-host; it does
   not shrink the on-host trusted base. It also attests the exported **set**, not completeness — events
   that never reached the spool are outside any spool-level evidence.
-- **Un-anchored tail window:** records appended since the last persisted anchor (segment rotation, ack, or
-  clean close) are modification-detectable but not clean-truncation-detectable — an attacker can snip the
-  chain's very end without evidence. Everything behind the last persisted anchor is fully covered.
-- **`head.json` (or whole-spool) deletion degrades, doesn't fool, the verifier:** losing `head.json` reports
-  as "anchors unavailable" (truncation detection lost) rather than a false-clean verdict — an absent anchor
-  is not treated as evidence of tampering, only garbled anchor *values* are. Deleting the entire spool
+- **Most-recent-records window:** the newest records written since the agent's last integrity checkpoint are
+  protected against modification, but removing them cleanly from the end of the spool may not be evidenced.
+  All earlier records are fully covered.
+- **Deleting the spool's integrity metadata degrades, doesn't fool, the verifier:** missing integrity metadata
+  is reported as "anchors unavailable" (truncation detection lost), never as a clean verdict; corrupted
+  metadata is reported as tamper evidence. Deleting the entire spool
   directory is self-evident (it's simply gone) and outside what any chain can detect.
 - **Front-truncation of already-acknowledged segments** (normal FIFO consumption deleting fully-sent
   segments) is indistinguishable from legitimate drain behavior — inherent, not a gap. (Front-truncation of
   the backlog — an attacker deleting oldest segments that were *not* yet acked — is detected, per above.)
-- **Anchor rollback to a consistent earlier state — now detected via the recency witness.** `head.json`
-  carries a monotonic **generation** (bumped each time the agent opens the spool, authenticated by the
-  same key as the chain) and the agent keeps an out-of-spool copy beside its chain key, plus reports it
-  on every heartbeat when centrally managed. An attacker who restores an earlier authentic snapshot of
-  the spool directory presents a chain that verifies — but its generation is older than the witness, and
-  the agent raises rollback evidence at the next start (and the platform can flag the decrease across
-  heartbeats). The auditor accepts the reference too: `-verify-spool <dir> -recency <spool-recency.json>`
+- **Anchor rollback to a consistent earlier state — now detected via the recency witness.** The agent
+  keeps an authenticated recency record outside the spool directory and, when centrally managed, reports
+  it on every heartbeat. If an earlier authentic snapshot of the spool directory is restored, the chain
+  still verifies, but the agent raises rollback evidence at the next start (and the platform can flag it
+  across heartbeats). The auditor accepts the reference too: `-verify-spool <dir> -recency <spool-recency.json>`
   reports `ROLLBACK EVIDENCE`; without a reference it reports recency as **unverified** rather than
   implying it. Remaining residual, stated plainly: an attacker who controls BOTH the spool directory and
   the agent's state directory — and whose agent is unmanaged (no heartbeat) — can restore both halves
