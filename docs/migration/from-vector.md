@@ -30,10 +30,20 @@ programs are listed for you to port, and the rest still converts.
 
 ## How it fits together
 
-```
-before:   files / journal / sockets ──► Vector ──► loki | splunk_hec_logs | elasticsearch | kafka | aws_s3 | socket   (per sink)
-after:    files / journal / sockets ──► agent  ──► the same destinations, selected by a condition per output
-          (or)                          agent  ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets"] --> b_tool["Vector"]
+    b_tool -->|"per sink"| b_dst["loki | splunk_hec_logs | elasticsearch | kafka | aws_s3 | socket"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets"] --> a_agent["agent"]
+    a_agent --> a_dst["the same destinations, selected by a condition per output"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

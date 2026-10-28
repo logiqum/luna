@@ -26,10 +26,20 @@ agent configuration plus a report of everything it could not carry over.
 
 ## How it fits together
 
-```
-before:   files / journal / syslog / event log ──► Promtail ──► Loki  (labels from targets + pipeline + external_labels)
-after:    files / journal / syslog / event log ──► agent    ──► the same Loki, the same labels
-          (or)                                      agent    ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / syslog / event log"] --> b_tool["Promtail"]
+    b_tool -->|"labels from targets + pipeline + external_labels"| b_dst["Loki"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / syslog / event log"] --> a_agent["agent"]
+    a_agent -->|"the same labels"| a_dst["the same Loki"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

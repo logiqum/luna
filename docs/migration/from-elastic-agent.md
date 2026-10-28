@@ -23,10 +23,20 @@ Check these first; they decide whether the conversion is a drop-in or a project.
 
 ## How it fits together
 
-```
-before:   files / journal / sockets / event logs ──► Elastic Agent ──► Elasticsearch | Logstash | Kafka
-after:    files / journal / sockets / event logs ──► agent         ──► the same destinations (bulk API, Beats protocol, Kafka)
-          (or)                                      agent          ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets / event logs"] --> b_tool["Elastic Agent"]
+    b_tool --> b_dst["Elasticsearch | Logstash | Kafka"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets / event logs"] --> a_agent["agent"]
+    a_agent -->|"bulk API, Beats protocol, Kafka"| a_dst["the same destinations"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 Elastic Agent names its destinations (`outputs:`) and points each input at one with `use_output`. The converter

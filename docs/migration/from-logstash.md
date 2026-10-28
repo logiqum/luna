@@ -13,13 +13,31 @@ are making:
   sends to a Logstash `beats` input. The agent then becomes the **gateway** — buffering to disk, TLS, reduction —
   in front of Logstash or instead of it, while the parsing you cannot carry stays where it is.
 
-```
-forwarder role:  files / syslog ──► Logstash ──► elasticsearch | kafka | syslog | s3
-          after: files / syslog ──► agent    ──► the same destinations, selected by a condition per output
-
-central role:    Beats ──► Logstash (grok, date, …) ──► Elasticsearch
-          after: Beats ──► agent beats_in (spool, TLS, reduction) ──► Logstash beats input ──► Elasticsearch
-            (or) Beats ──► agent beats_in ──► elasticsearch / kafka / syslog directly, when no parsing is needed
+```mermaid
+flowchart TB
+  subgraph F["Forwarder role: before"]
+    direction LR
+    fb_src["files / syslog"] --> fb_tool["Logstash"]
+    fb_tool --> fb_dst["elasticsearch | kafka | syslog | s3"]
+  end
+  subgraph FA["Forwarder role: after"]
+    direction LR
+    fa_src["files / syslog"] --> fa_agent["agent"]
+    fa_agent --> fa_dst["the same destinations, selected by a condition per output"]
+  end
+  subgraph C["Central role: before"]
+    direction LR
+    cb_src["Beats"] -->|"grok, date, ..."| cb_tool["Logstash"]
+    cb_tool --> cb_dst["Elasticsearch"]
+  end
+  subgraph CA["Central role: after"]
+    direction LR
+    ca_src["Beats"] --> ca_agent["agent beats_in (spool, TLS, reduction)"]
+    ca_agent --> ca_ls["Logstash beats input"]
+    ca_ls --> ca_dst["Elasticsearch"]
+    ca_agent -->|"or, when no parsing is needed"| ca_direct["elasticsearch / kafka / syslog directly"]
+  end
+  F ~~~ FA ~~~ C ~~~ CA
 ```
 
 ## Is it a fit?

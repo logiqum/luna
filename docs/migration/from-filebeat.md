@@ -24,10 +24,20 @@ Check these first; they decide whether the conversion is a drop-in or a project.
 
 ## How it fits together
 
-```
-before:   files / journal / sockets ──► Filebeat ──► Logstash | Elasticsearch | Kafka
-after:    files / journal / sockets ──► agent    ──► the same destination (Beats protocol, bulk API, Kafka)
-          (or)                          agent    ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets"] --> b_tool["Filebeat"]
+    b_tool --> b_dst["Logstash | Elasticsearch | Kafka"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets"] --> a_agent["agent"]
+    a_agent -->|"Beats protocol, bulk API, Kafka"| a_dst["the same destination"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

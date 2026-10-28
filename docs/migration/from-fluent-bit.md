@@ -32,10 +32,20 @@ Check these first; they decide whether the conversion is a drop-in or a project.
 
 ## How it fits together
 
-```
-before:   files / journal / sockets ──► Fluent Bit ──► forward | es | kafka | loki | splunk | …   (by Match)
-after:    files / journal / sockets ──► agent      ──► the same destinations, selected by a condition per output
-          (or)                          agent      ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets"] --> b_tool["Fluent Bit"]
+    b_tool -->|"by Match"| b_dst["forward | es | kafka | loki | splunk | ..."]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets"] --> a_agent["agent"]
+    a_agent --> a_dst["the same destinations, selected by a condition per output"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

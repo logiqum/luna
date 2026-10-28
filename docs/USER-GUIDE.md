@@ -10,13 +10,19 @@ task-oriented walkthrough.
 
 ## What it does
 
-```
-  your endpoints/devices                 the agent                         your aggregator
- ┌──────────────────────┐      ┌──────────────────────────────┐      ┌─────────────────────┐
- │ Windows Event Log    │─────►│ collect → filter/enrich →    │─────►│ syslog-ng / SIEM /  │
- │ log files · journald │      │ buffer (disk) → forward      │ RFC  │ logrok / any        │
- │ syslog from devices  │      │ as RFC 5424 over TLS         │ 5424 │ syslog:TLS listener │
- └──────────────────────┘      └──────────────────────────────┘      └─────────────────────┘
+```mermaid
+flowchart LR
+  subgraph S1["your endpoints/devices"]
+    E["Windows Event Log<br/>log files · journald<br/>syslog from devices"]
+  end
+  subgraph S2["the agent"]
+    A["collect → filter/enrich →<br/>buffer (disk) → forward<br/>as RFC 5424 over TLS"]
+  end
+  subgraph S3["your aggregator"]
+    G["syslog-ng / SIEM /<br/>logrok / any<br/>syslog:TLS listener"]
+  end
+  E --> A
+  A -->|"RFC 5424"| G
 ```
 
 One static, dependency-free binary. If the network or aggregator is down, events are written to a local disk
@@ -1330,17 +1336,25 @@ outputs:
 
 The chain at a glance — where the application-level ack lives, and what covers each hop:
 
+```mermaid
+flowchart LR
+  subgraph S1["edge agent"]
+    E["inputs → pipeline →<br/>spool → relay out"]
+  end
+  subgraph S2["gateway agent"]
+    W["relay_in → pipeline →<br/>spool → syslog out"]
+  end
+  subgraph S3["aggregator"]
+    G["syslog listener<br/>(logrok, SIEM, any)"]
+  end
+  E ==>|"relay"| W
+  W -->|"ACK"| E
+  W -->|"RFC 5424<br/>TCP/TLS"| G
 ```
- edge agent                        gateway agent                       aggregator
-┌─────────────────────┐  relay   ┌──────────────────────┐  RFC 5424  ┌──────────────────────┐
-│ inputs → pipeline → │═════════►│ relay_in → pipeline → │───────────►│ syslog listener      │
-│ spool → relay out   │◄── ACK ──│ spool → syslog out    │  TCP/TLS   │ (logrok, SIEM, any)  │
-└─────────────────────┘          └──────────────────────┘            └──────────────────────┘
-  segment 1: app-acked             segment 2: standard syslog          delivery visible in the
-  ACK arrives only after the       backed by the gateway's disk        aggregator (search/count)
-  gateway DURABLY committed        spool + connection-liveness
-  the batch (never on receipt)     probes on every (re)dial
-```
+
+- Segment 1 (edge to gateway): app-acked. The ACK arrives only after the gateway DURABLY committed the batch (never on receipt).
+- Segment 2 (gateway to aggregator): standard syslog backed by the gateway's disk spool + connection-liveness probes on every (re)dial.
+- Delivery is visible in the aggregator (search/count).
 
 A batch resent after a dropped connection is recognised by the gateway and not stored twice.
 

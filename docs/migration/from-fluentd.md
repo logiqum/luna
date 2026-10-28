@@ -34,10 +34,20 @@ Check these first; they decide whether the conversion is a drop-in or a project.
 
 ## How it fits together
 
-```
-before:   files / journal / sockets ──► Fluentd ──► forward | elasticsearch | kafka2 | loki | splunk_hec | s3 | …   (first <match>)
-after:    files / journal / sockets ──► agent   ──► the same destinations, selected by a condition per output
-          (or)                          agent   ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets"] --> b_tool["Fluentd"]
+    b_tool -->|"first #lt;match#gt;"| b_dst["forward | elasticsearch | kafka2 | loki | splunk_hec | s3 | ..."]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets"] --> a_agent["agent"]
+    a_agent --> a_dst["the same destinations, selected by a condition per output"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

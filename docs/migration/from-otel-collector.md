@@ -28,10 +28,20 @@ small part of what it does, convert the logs and keep the collector for the rest
 
 ## How it fits together
 
-```
-before:   files / journal / sockets ──► OpenTelemetry Collector ──► otlp | splunk_hec | elasticsearch | kafka | syslog   (per pipeline)
-after:    files / journal / sockets ──► agent                   ──► the same destinations, selected by a condition per output
-          (or)                          agent                   ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets"] --> b_tool["OpenTelemetry Collector"]
+    b_tool -->|"per pipeline"| b_dst["otlp | splunk_hec | elasticsearch | kafka | syslog"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets"] --> a_agent["agent"]
+    a_agent --> a_dst["the same destinations, selected by a condition per output"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 If you would rather leave the collector in place, the agent can also sit in front of it: its `otlp` output sends

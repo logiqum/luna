@@ -32,10 +32,20 @@ Check these first; they decide whether the conversion is a drop-in or a project.
 
 ## How it fits together
 
-```
-before:   files / journal / sockets / relay ──► syslog-ng ──► network | syslog | elasticsearch-http | kafka | loki | splunk-hec-event   (by log path)
-after:    files / journal / sockets / relay ──► agent     ──► the same destinations, each with a condition that selects what its log paths delivered
-          (or)                                  agent     ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / journal / sockets / relay"] --> b_tool["syslog-ng"]
+    b_tool -->|"by log path"| b_dst["network | syslog | elasticsearch-http | kafka | loki | splunk-hec-event"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / journal / sockets / relay"] --> a_agent["agent"]
+    a_agent --> a_dst["the same destinations, each with a condition that selects what its log paths delivered"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

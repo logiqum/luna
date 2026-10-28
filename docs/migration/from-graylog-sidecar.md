@@ -25,12 +25,21 @@ file. This guide converts what the Sidecar has already written on a host into th
 
 ## How it fits together
 
-```
-before:   files / Event Log ──► Filebeat | Winlogbeat | NXLog ──► Graylog (Beats / GELF / syslog input)
-                                  ▲ configured and restarted by the Sidecar, from the Graylog server
-
-after:    files / Event Log ──► agent ──► the same Beats destination, or a syslog receiver
-                                  ▲ configured by one file (or by the agent's central management)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / Event Log"] --> b_tool["Filebeat | Winlogbeat | NXLog"]
+    b_tool --> b_dst["Graylog (Beats / GELF / syslog input)"]
+    b_sc["configured and restarted by the Sidecar, from the Graylog server"] --> b_tool
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / Event Log"] --> a_agent["agent"]
+    a_agent --> a_dst["the same Beats destination, or a syslog receiver"]
+    a_cfg["configured by one file (or by the agent's central management)"] --> a_agent
+  end
+  B ~~~ A
 ```
 
 What replaces the Sidecar is **the agent's own configuration**: a file on the host, or the agent's central

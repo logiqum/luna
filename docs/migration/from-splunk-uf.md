@@ -12,10 +12,20 @@ You don't rewrite the configuration by hand: the agent reads the forwarder's own
 
 ## How it fits together
 
-```
-before:   files / Event Log ──► Universal Forwarder ──(Splunk forwarding, :9997)──► indexers
-after:    files / Event Log ──► agent ──(HTTP Event Collector, :8088)──► the same indexers
-          (or)                  agent ──(RFC 5424 syslog over TLS)──► logrok / any syslog receiver
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / Event Log"] --> b_tool["Universal Forwarder"]
+    b_tool -->|"Splunk forwarding, :9997"| b_dst["indexers"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / Event Log"] --> a_agent["agent"]
+    a_agent -->|"HTTP Event Collector, :8088"| a_dst["the same indexers"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 The agent sends to Splunk over the **HTTP Event Collector (HEC)**, Splunk's documented ingest API. HEC

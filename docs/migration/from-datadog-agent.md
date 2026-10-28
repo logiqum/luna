@@ -28,9 +28,19 @@ metrics, APM, process and network monitoring, and every Datadog integration chec
 
 ## How it fits together
 
-```
-before:   files / ports / journal / event log ──► Datadog Agent ──► Datadog intake
-after:    files / ports / journal / event log ──► agent         ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["files / ports / journal / event log"] --> b_tool["Datadog Agent"]
+    b_tool --> b_dst["Datadog intake"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["files / ports / journal / event log"] --> a_agent["agent"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_dst["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — convert

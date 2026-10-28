@@ -34,10 +34,21 @@ this converter then reads.
 
 ## How it fits together
 
-```
-before:  event log / syslog daemon / files ──► Azure Monitor Agent ──► (DCR, KQL) ──► Log Analytics tables
-after:   event log / syslog daemon / files ──► agent ──► Logs Ingestion API ──► (new Direct DCR, KQL) ──► the same tables
-         (or)                                  agent ──► RFC 5424 syslog over TLS (logrok / any syslog receiver)
+```mermaid
+flowchart TB
+  subgraph B["Before"]
+    direction LR
+    b_src["event log / syslog daemon / files"] --> b_tool["Azure Monitor Agent"]
+    b_tool -->|"DCR, KQL"| b_dst["Log Analytics tables"]
+  end
+  subgraph A["After"]
+    direction LR
+    a_src["event log / syslog daemon / files"] --> a_agent["agent"]
+    a_agent -->|"Logs Ingestion API"| a_dcr["new Direct DCR, KQL"]
+    a_dcr --> a_dst["the same tables"]
+    a_agent -->|"RFC 5424 syslog over TLS"| a_alt["logrok / any syslog receiver"]
+  end
+  B ~~~ A
 ```
 
 ## Step 1 — export the rule
