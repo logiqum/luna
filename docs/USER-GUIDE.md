@@ -2079,11 +2079,10 @@ Two settings under `service:` decide how fast one agent moves events. Change one
    noticeable round trip the batch size sets the ceiling. Raise it first when the receiver is far away or
    slow to answer (see [`batch_size`](CONFIGURATION.md#service)).
 2. **`workers`** — when the agent's processors are what holds it back (the agent uses about one core
-   flat out while the receiver keeps up), `workers: 4` or `8` spreads them over several cores. The
-   processors that are safe to run concurrently (`add_fields`, `filter`, `expr`, the `parse_*` set,
-   `redact`, `trim_fields`, `lookup`, `file_hash`, `noise_fingerprint`, keyed `sample`) run on the
-   workers; `dedup`, `throttle`, `quota`, unkeyed `sample`, `adaptive_sample` and `aggregate` keep running
-   in arrival order, so their results are the same as with one worker.
+   flat out while the receiver keeps up), `workers: 4` or `8` spreads them over several cores.
+   Processors that must see events in arrival order (`dedup`, `throttle`, `quota`, `adaptive_sample`,
+   `aggregate` and unkeyed `sample`) keep running in order, so their results are the same as with one
+   worker; place the others first.
 
 ```yaml
 service:
@@ -2098,10 +2097,8 @@ processors:
     keep_min_severity: 3
 ```
 
-**Put the parallel-safe processors first.** Only the leading run of them goes to the workers; the first
-processor that must see events in order, and everything after it, runs on one worker. At start-up the
-agent logs the split (`parallel_prefix` and `serial_processors`) and warns when nothing can run in
-parallel. Delivery order, batch contents and when an input saves its position are the same as with
+**Put the order-independent processors first**, the ones that must see events in order after them. At
+start-up the agent logs the arrangement and warns when nothing can run in parallel. Delivery order, batch contents and when an input saves its position are the same as with
 `workers: 1`. The default stays `1`, the pipeline of earlier releases. **4–8 is the
 practical range; more workers than CPUs gives no gain** — a value above the CPUs the agent may use (or
 above `limits.max_procs`) is applied as written and logs a warning.
@@ -2517,7 +2514,7 @@ can never leave an agent on an old entitlement: the control plane re-sends until
   healthy; under load batches fill by size and it is far lower), `pipeline_stage_busy_seconds_total{stage}` (with
   `service.workers` above 1: the stage whose busy seconds keep pace with wall-clock time is what limits
   throughput — if it is `ship`, more workers will not help, raise `batch_size` instead; `pipeline_workers` and
-  `pipeline_parallel_prefix` show how many workers run and how many leading processors they cover),
+  `pipeline_parallel_prefix` show how many workers run and how many processors run across them),
   `pipeline_hop_busy_seconds_total{hop}` with `pipeline_hop_events_total{hop}` (per hop of the path — each stage,
   each destination's delivery `dest:<name>`, its spool writes `spool:<name>` and spool drain `drain:<name>`, and an input's own reading `input:<name>` for the syslog receiver's TCP and TLS streams:
   events ÷ busy seconds is the rate that hop could reach if it never waited, and the hop with the lowest rate is
