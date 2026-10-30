@@ -1852,7 +1852,7 @@ a recorded outcome rather than a silently absent field.
 | `path_fields` | list | *(required)* | Event fields that may hold the path; the **first non-empty one wins**. One processor serves several sources: `[path, TargetFilename, ObjectName]` covers auditd, Sysmon and Windows object-access auditing |
 | `roots` | list | *(required)* | Directories whose files may be hashed, e.g. `[/etc, /usr/bin]`. A path resolving outside every root is refused with status `denied`. **No default — see above** |
 | `algorithm` | string | `sha256` | `sha256`, `sha512` or `sha1`. `sha1` is offered so you can compare against an existing scan-and-checksum FIM baseline without rehashing an estate; it is not the default |
-| `max_size` | int | `67108864` (64 MiB) | Files larger than this are skipped with status `too_large`. Hashing is O(size) on the pipeline, so an unbounded cap turns one large file landing in a watched directory into a collection stall |
+| `max_size` | int | `67108864` (64 MiB) | Files larger than this are skipped with status `too_large`. A large file takes proportionally longer to hash, so an unbounded cap turns one large file landing in a watched directory into a collection stall |
 | `prefix` | string | `file_` | Prefix for the added fields → `file_hash`, `file_hash_algo`, `file_size`, `file_hash_status` |
 | `cache` | int | `1024` | number of recent file digests remembered, so a file that is still being written is not re-hashed for every event |
 | `overwrite` | bool | `false` | Re-hash even when the event already carries a digest. Leave off behind a relay: the upstream hop hashed the file where it actually lives, and this host's filesystem is the wrong one to consult |

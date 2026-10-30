@@ -99,7 +99,7 @@ buffer:
 # Optional caps on the agent's own resource use. Omit for no caps.
 # limits:
 #   max_procs: 2            # run on at most 2 CPU cores at once; 0 = runtime default (all cores / container quota)
-#   memory_limit_mib: 512   # pause reading inputs at 90% of this, resume below 80%; nothing accepted is dropped. 0 = none, else >= 32
+#   memory_limit_mib: 512   # memory budget; the agent pauses reading as usage nears it and resumes once memory recovers; nothing accepted is dropped. 0 = none, else >= 32
 
 # Optional. Omit for the free Core tier (also the non-commercial / free-with-logrok path).
 # A standalone commercial deployment points at a signed offline license; it's verified
@@ -191,7 +191,7 @@ inputs:
   #   # tls_client_ca_file: /etc/logrok-universal-agent/ca.pem  # mTLS: require device certificates
   #   # parse_tag: true               # RFC 3164: lift "myapp[88]: " into app/procid (sent as APP-NAME/PROCID); default false
   #   # max_connections: 1024         # concurrent TCP/TLS/unix-stream connections; more are closed at once
-  #   # udp_listeners: 1              # UDP sockets on listen, one core each (1-64 or auto; Linux/FreeBSD above 1); >1 = no order across them
+  #   # udp_listeners: 1              # UDP receive sockets on listen (1-64 or auto; Linux/FreeBSD above 1); >1 = more cores, no order across them
   #   # udp_receive_buffer_bytes: 8388608  # per UDP socket (capped by net.core.rmem_max); 0 = OS default
 
   # - type: gelf_in                   # receive GELF (Docker gelf driver, Graylog libraries) — Apex
@@ -486,9 +486,9 @@ processors:
   #                                   # so without a bound a crafted event could ask the agent to hash any
   #                                   # file it can read. Symlinks resolve BEFORE this check.
   #   algorithm: sha256               # sha256 (default) | sha512 | sha1 (match an existing FIM baseline)
-  #   max_size: 67108864              # 64 MiB; larger files are skipped as too_large (hashing is O(size))
+  #   max_size: 67108864              # 64 MiB; larger files are skipped as too_large
   #   prefix: file_                   # -> file_hash, file_hash_algo, file_size, file_hash_status
-  #   cache: 1024                     # (path,mtime,size) -> digest memo; a file under active write re-hashes otherwise
+  #   cache: 1024                     # number of recent file digests remembered; a file still being written is not re-hashed each event
   #   overwrite: false                # leave off behind a relay — the upstream hop hashed the real file
 
 outputs:

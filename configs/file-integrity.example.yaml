@@ -130,7 +130,7 @@ processors:
     path_fields: [path, TargetFilename, ObjectName]   # auditd / Sysmon / 4663
     roots: [/etc, /usr/bin, /usr/sbin]
     algorithm: sha256          # sha1 available to match an existing FIM baseline
-    max_size: 33554432         # 32 MiB — hashing is O(size) on the pipeline
+    max_size: 33554432         # 32 MiB — larger files cost more to hash
 
   # Tag the stream so the platform can route and retain file-integrity evidence
   # on its own schedule — compliance retention for this is usually longer than
