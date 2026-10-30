@@ -2089,7 +2089,7 @@ service:
   batch_size: 1024
   workers: 8
 processors:
-  - type: parse_kv          # parallel-safe processors first ...
+  - type: parse_kv          # order-independent processors first ...
   - type: redact
     patterns: [ipv4, email]
   - type: noise_fingerprint
@@ -2933,7 +2933,7 @@ exactly the destinations that want it — see
 **tamper-evident hash-chained spool** on by default + the offline `-verify-spool` auditor CLI — see
 [Auditing the spool](#auditing-the-spool)), Prometheus `/metrics` including license posture
 (state / tier / grace countdown, also reported on every heartbeat — see [Verify & monitor](#verify--monitor)),
-optional **parallel processing** (`service.workers`: the parallel-safe leading processors on several cores,
+optional **parallel processing** (`service.workers`: process across several cores,
 order-dependent ones and delivery order unchanged — see
 [Tuning throughput](#tuning-throughput--batch-size-first-then-processor-workers)),
 and **central management, live end-to-end**: one-time enrollment, heartbeat, and config-pull with validated

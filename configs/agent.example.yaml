@@ -20,9 +20,9 @@ service:
   # batch_timeout: 1s       # send a partial batch after this long
   # shutdown_grace: 15s   # on stop, how long to keep delivering the last batch (1s-10m; 0/unset = 15s);
                            # past it the batch is re-read by file/journal inputs, lost by network inputs
-  # workers: 1             # 2-64 = run the leading parallel-safe processors (parsers, redact, lookup,
-                           # noise_fingerprint, ...) on N workers; order-dependent ones (dedup, throttle,
-                           # quota, aggregate) still run in arrival order. Delivery order is unchanged.
+  # workers: 1             # 2-64 = process events across N workers for more throughput; order-dependent
+                           # processors (dedup, throttle, quota, aggregate) run in arrival order, so place
+                           # the others first. Delivery order is unchanged.
   # fips: on               # on | off (unset = run as built; the shipped build is FIPS) — SETS the crypto posture
                            # Applied by re-executing once at startup; the PID does not
                            # change, so service supervision is unaffected. Turn off only
